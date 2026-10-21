@@ -21,9 +21,11 @@ La Windows-versio petas administrantajn rajtojn per UAC ĉe lanĉo. Hyper-V kaj 
 
 Malfermu [la plej novan eldonon en GitHub Releases](https://github.com/hogehohe/hyperv-studio/releases/latest), elŝutu `Hyper-V-Studio_<versio>_x64-setup.exe` el la sekcio Assets kaj rulu ĝin.
 
+Por uzi ĉi tiun instalilon, vi ne bezonas Node.js, Rust aŭ Microsoft C++ Build Tools. La instalilo kontrolas WebView2: se ĝi jam estas instalita, ĝi uzas ĝin; alikaze ĝi aŭtomate elŝutas kaj instalas ĝin. Interreta konekto estas bezonata por ĉi tiu elŝuto. Hyper-V kaj ĝia PowerShell-modulo devas esti ebligitaj en Windows.
+
 ### Programado kaj konstruado
 
-Instalu Node.js, la Rust-ilĉenon por MSVC, Microsoft C++ Build Tools kaj WebView2. Rulu la jenajn komandojn en PowerShell malfermita kun administrantaj rajtoj.
+Ĉi tiu sekcio celas nur tiujn, kiuj volas modifi la fontkodon aŭ mem konstrui la aplikaĵon. Instalu Node.js, la Rust-ilĉenon por MSVC, Microsoft C++ Build Tools kaj WebView2. Rulu la jenajn komandojn en PowerShell malfermita kun administrantaj rajtoj.
 
 ```powershell
 cd hyperv-studio
@@ -60,9 +62,11 @@ Windows 版は起動時に UAC で管理者権限を要求します。Hyper-V �
 
 [GitHub Releases の最新版](https://github.com/hogehohe/hyperv-studio/releases/latest)から、Assets の `Hyper-V-Studio_<バージョン>_x64-setup.exe` をダウンロードして実行します。
 
+このインストーラーを使う場合、Node.js・Rust・Microsoft C++ Build Tools の準備は不要です。WebView2 は導入済みなら使用し、未導入なら自動ダウンロードしてインストールします。このダウンロードにはインターネット接続が必要です。Hyper-V とその PowerShell モジュールは Windows 側で有効化しておく必要があります。
+
 ### 開発・ビルド
 
-Node.js、Rust MSVC、Microsoft C++ Build Tools、WebView2 を用意し、管理者権限で開いた PowerShell から実行します。
+この節は、ソースコードを変更する人や自分でビルドする人向けです。Node.js、Rust MSVC、Microsoft C++ Build Tools、WebView2 を用意し、管理者権限で開いた PowerShell から実行します。
 
 ```powershell
 cd hyperv-studio

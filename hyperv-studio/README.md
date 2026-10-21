@@ -125,12 +125,18 @@ Por la kazo, ke pluraj DHCP-serviloj liveras defaŭltajn enirejojn, la NIC-oj ri
 
 ### Sistemaj postuloj
 
+Por uzi la instalilon el [GitHub Releases](https://github.com/hogehohe/hyperv-studio/releases/latest):
+
 - Windows 11 Pro / Enterprise kun Hyper-V ebligita, aŭ subtenata Windows Server
 - La PowerShell-modulo Hyper-V
 - Administraj rajtoj en Windows (permesu la UAC-peton je lanĉo kaj, se necese, enigu la akreditaĵojn de administra konto)
-- Por evoluigado: Node.js, la Rust MSVC-ilĉeno, Microsoft C++ Build Tools kaj WebView2
+- WebView2; se ĝi mankas, la instalilo aŭtomate elŝutas kaj instalas ĝin. Interreta konekto estas bezonata por ĉi tiu elŝuto.
+
+Node.js, Rust kaj Microsoft C++ Build Tools estas bezonataj nur por evoluigado kaj konstruado el la fontkodo. La uzanto de la instalilo ne bezonas prepari ilin. Hyper-V kaj ĝia PowerShell-modulo devas esti ebligitaj en Windows.
 
 ### Evoluigado kaj rulado
+
+Nur por modifi aŭ mem konstrui la aplikaĵon, preparu Node.js, la Rust MSVC-ilĉenon, Microsoft C++ Build Tools kaj WebView2.
 
 En Windows, rulu el PowerShell malfermita kun administraj rajtoj.
 
@@ -292,12 +298,18 @@ DHCP で IP アドレスを取得するには、接続する各 NIC の仮想ス
 
 ### 必要な環境
 
+[GitHub Releases](https://github.com/hogehohe/hyperv-studio/releases/latest) のインストーラーを使う場合:
+
 - Hyper-V が有効な Windows 11 Pro / Enterprise、または対応する Windows Server
 - Hyper-V PowerShell モジュール
 - Windows の管理者権限（アプリ起動時の UAC で許可、必要に応じて管理者アカウントの資格情報を入力）
-- 開発時は Node.js、Rust MSVC ツールチェーン、Microsoft C++ Build Tools、WebView2
+- WebView2。未導入の場合はインストーラーが自動ダウンロードしてインストールします。このダウンロードにはインターネット接続が必要です。
+
+Node.js・Rust・Microsoft C++ Build Tools は、開発やソースからのビルドにのみ必要です。インストーラーを使う人が準備する必要はありません。Hyper-V とその PowerShell モジュールは Windows 側で有効化しておいてください。
 
 ### 開発・実行
+
+アプリを変更する人や自分でビルドする人のみ、Node.js・Rust MSVC ツールチェーン・Microsoft C++ Build Tools・WebView2 を用意します。
 
 Windows では、管理者権限で開いた PowerShell から実行します。
 
