@@ -13,6 +13,10 @@
 
 Windows 版は起動時に UAC で管理者権限を要求します。Hyper-V と Hyper-V PowerShell モジュールが必要です。
 
+## インストール
+
+[GitHub Releases の最新版](https://github.com/hogehohe/hyperv-studio/releases/latest)から、Assets の `Hyper-V-Studio_<バージョン>_x64-setup.exe` をダウンロードして実行します。
+
 ## 開発・ビルド
 
 Node.js、Rust MSVC、Microsoft C++ Build Tools、WebView2 を用意し、管理者権限で開いた PowerShell から実行します。

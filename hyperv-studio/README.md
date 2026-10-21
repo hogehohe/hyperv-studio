@@ -145,6 +145,8 @@ npm run tauri build
 
 ### Windows インストーラー
 
+配布済みの Windows 用インストーラーは [GitHub Releases](https://github.com/hogehohe/hyperv-studio/releases/latest) からダウンロードできます。
+
 配布用ビルドでは、日本語の NSIS セットアップ EXE を `src-tauri/target/release/bundle/nsis/` に生成します。現在のユーザー向けにインストールし、スタートメニューと Windows のインストール済みアプリから起動・アンインストールできます。
 
 アプリ本体をビルド済みで、インストーラーだけを作り直す場合は次を実行します。
