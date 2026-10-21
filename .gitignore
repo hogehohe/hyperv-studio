@@ -1,0 +1,23 @@
+# Local verification output and runtime data
+/artifacts/
+*.iso
+*.vhd
+*.vhdx
+*.avhd
+*.avhdx
+*.vmcx
+*.vmrs
+*.vmgs
+
+# Local credentials and environment settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Build output is distributed separately
+*.exe
+*.msi
