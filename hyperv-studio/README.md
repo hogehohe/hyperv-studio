@@ -130,7 +130,7 @@ Por uzi la instalilon el [GitHub Releases](https://github.com/hogehohe/hyperv-st
 - Windows 11 Pro / Enterprise kun Hyper-V ebligita, aŭ subtenata Windows Server
 - La PowerShell-modulo Hyper-V
 - Administraj rajtoj en Windows (permesu la UAC-peton je lanĉo kaj, se necese, enigu la akreditaĵojn de administra konto)
-- WebView2; se ĝi mankas, la instalilo aŭtomate elŝutas kaj instalas ĝin. Interreta konekto estas bezonata por ĉi tiu elŝuto.
+- WebView2; se ĝi mankas, la ordinara instalilo elŝutas ĝin per Interreto, dum la senreta instalilo uzas la kunpakitan kompletan instalilon.
 
 Node.js, Rust kaj Microsoft C++ Build Tools estas bezonataj nur por evoluigado kaj konstruado el la fontkodo. La uzanto de la instalilo ne bezonas prepari ilin. Hyper-V kaj ĝia PowerShell-modulo devas esti ebligitaj en Windows.
 
@@ -165,7 +165,15 @@ Se la aplikaĵo jam estas konstruita kaj vi volas rekrei nur la instalilon, rulu
 npm run tauri -- bundle --bundles nsis --ci
 ```
 
-Se WebView2 jam estas instalita, la instalilo uzas tiun rulmedion; alikaze ĝi elŝutas ĝin dum instalado. La ISO-biblioteko kaj VM-diskoj ne estas inkluzivitaj en la instalilo. Por la sama uzantokonto, la aplikaĵo daŭre uzas la ekzistantajn datumojn en `%LOCALAPPDATA%\jp.local.hypervstudio`.
+Post konstruado de la aplikaĵo, por paki ankaŭ la senretan instalilon:
+
+```powershell
+npm run bundle:offline
+```
+
+La senreta dosiero nomiĝas `Hyper-V-Studio_<versio>_x64-offline-setup.exe`, en la sama dosierujo kiel la ordinara instalilo. La unua pakado bezonas Interretan konekton por akiri la kompletan instalilon de WebView2.
+
+Ambaŭ instaliloj kontrolas la ekzistantan WebView2 kaj preterlasas ĝian instaladon se ĝi jam ĉeestas. Se ĝi mankas, la ordinara `_x64-setup.exe` elŝutas ĝin per Interreto; la senreta `_x64-offline-setup.exe` instalas ĝin el sia kompleta kunpakita instalilo, sen elŝuto. La ISO-biblioteko kaj VM-diskoj ne estas inkluzivitaj en la instalilo. Por la sama uzantokonto, la aplikaĵo daŭre uzas la ekzistantajn datumojn en `%LOCALAPPDATA%\jp.local.hypervstudio`.
 
 Se dum malinstalado vi elektas 「アプリケーションのデータを削除」 (forigi la datumojn de la aplikaĵo), la ISO-biblioteko kaj aplikaĵaj agordoj ankaŭ estos forigitaj. Ne elektu tion se vi volas konservi la ISO-diskbildojn. La opcio estas defaŭlte malŝaltita.
 
@@ -303,7 +311,7 @@ DHCP で IP アドレスを取得するには、接続する各 NIC の仮想ス
 - Hyper-V が有効な Windows 11 Pro / Enterprise、または対応する Windows Server
 - Hyper-V PowerShell モジュール
 - Windows の管理者権限（アプリ起動時の UAC で許可、必要に応じて管理者アカウントの資格情報を入力）
-- WebView2。未導入の場合はインストーラーが自動ダウンロードしてインストールします。このダウンロードにはインターネット接続が必要です。
+- WebView2。未導入の場合、通常版はインターネットから取得し、オフライン版は同梱した完全なインストーラーから導入します。
 
 Node.js・Rust・Microsoft C++ Build Tools は、開発やソースからのビルドにのみ必要です。インストーラーを使う人が準備する必要はありません。Hyper-V とその PowerShell モジュールは Windows 側で有効化しておいてください。
 
@@ -338,7 +346,15 @@ npm run tauri build
 npm run tauri -- bundle --bundles nsis --ci
 ```
 
-WebView2 が導入済みの場合はそのランタイムを使用し、未導入の場合はセットアップ中にダウンロードします。ISO ライブラリや VM のディスクはインストーラーに含めません。同じアカウントでは、既存の `%LOCALAPPDATA%\jp.local.hypervstudio` のデータを引き続き使用します。
+アプリをビルドした後、オフライン版も作成する場合:
+
+```powershell
+npm run bundle:offline
+```
+
+オフライン版は、通常版と同じフォルダーに `Hyper-V-Studio_<バージョン>_x64-offline-setup.exe` という名前で生成します。初回の作成時は、同梱する WebView2 の取得用にインターネット接続が必要です。
+
+どちらも既存の WebView2 を確認し、導入済みならそのインストールをスキップします。未導入の場合、通常版の `_x64-setup.exe` はインターネットから取得し、オフライン版の `_x64-offline-setup.exe` は同梱した完全なインストーラーから導入します。ISO ライブラリや VM のディスクはインストーラーに含めません。同じアカウントでは、既存の `%LOCALAPPDATA%\jp.local.hypervstudio` のデータを引き続き使用します。
 
 アンインストール時の「アプリケーションのデータを削除」を選ぶと、ISO ライブラリとアプリ設定も削除されます。ISO を保持する場合は選ばないでください。この項目は初期状態ではオフです。
 
