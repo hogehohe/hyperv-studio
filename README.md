@@ -14,6 +14,7 @@ Labortabla aplikaĵo por Windows, kiu ebligas krei kaj administri lokajn virtual
 - Administri bibliotekon de ISO-bildoj kaj elekti operaciuman bildon dum kreado de nova maŝino
 - Agordi plurajn retadaptilojn, Secure Boot kaj la lanĉordon
 - Vidi virtualajn ŝaltilojn, hostajn retadaptilojn kaj la IP-adresojn raportitajn de Hyper-V en la retlisto
+- Krei kaj forigi virtualajn ŝaltilojn, kaj agordi la hostan IPv4-adreson de propra Internal-ŝaltilo
 - Agordi la komputilan nomon kaj DHCP dum klonado de preparitaj AlmaLinux / Rocky Linux / RHEL-maŝinoj
 - Elekti helan aŭ malhelan aspekton, aŭ sekvi la sisteman agordon
 
@@ -23,7 +24,7 @@ La Windows-versio petas administrantajn rajtojn per UAC ĉe lanĉo. Hyper-V kaj 
 
 Por registri ŝablonon, elektu haltigitan VM-on kaj premu 「テンプレートとして登録…」; konfirmu per ĝia ekzakte tajpita nomo. Ĝi aperas en la aparta sekcio 「テンプレート」. Dum ĝi estas registrita, la aplikaĵo blokas ĝiajn ekfunkciigon, malŝalton, konzolan konekton, renomadon, forigon kaj ŝanĝojn de retaj aŭ ekŝargaj agordoj. Vidi la agordojn kaj kloni restas eble; la klono estas ordinara VM. Por redakti la originalon, unue malregistru ĝin, denove konfirmante la ekzaktan nomon. Tio ne forigas la VM-on aŭ ĝiajn diskojn. Registrado ne preparas la gastoperaciumon por cloud-init. La protekto estas loka al ĉi tiu aplikaĵo kaj Windows-uzantokonto; ĝi ne malhelpas ŝanĝojn per Hyper-V Manager, PowerShell aŭ aliaj iloj.
 
-La sekcio 「ネットワーク」 estas nurlega listo de ŝaltiloj External / Internal / Private, iliaj hostaj retadaptiloj kun IP-adreso kaj prefikslongo, kaj la konektitaj VM-NIC-oj. VM-adresoj estas valoroj raportitaj de Hyper-V kaj povas manki aŭ esti malaktualaj. Internal ne nepre signifas reton sen ekstera konekto: NAT aŭ vojigo povas ligi ĝin al aliaj retoj. La listo ne determinas DHCP- aŭ NAT-agordojn kaj ne testas konekteblecon. Detalaj instrukcioj kaj la proceduro por forigi restantan ŝablonregistron de ne plu ekzistanta VM troviĝas en [la README de la aplikaĵo](hyperv-studio/README.md#esperanto).
+La sekcio 「ネットワーク」 montras ŝaltilojn External / Internal / Private, iliajn hostajn retadaptilojn kun IP-adreso kaj prefikslongo, kaj la konektitajn VM-NIC-ojn. Ĝi ankaŭ ebligas krei ŝaltilojn, forigi neuzatajn ŝaltilojn kaj agordi unu fiksan hostan IPv4-adreson de propra Internal-ŝaltilo. Default Switch kaj aliaj sistem-administrataj retoj estas protektataj. Forigo kaj IP-ŝanĝo postulas konfirmon per la ekzakte tajpita ŝaltilnomo. VM-adresoj estas valoroj raportitaj de Hyper-V kaj povas manki aŭ esti malaktualaj. Internal ne nepre signifas reton sen ekstera konekto: NAT aŭ vojigo povas ligi ĝin al aliaj retoj. La aplikaĵo ne kreas DHCP-servilon aŭ NAT kaj ne testas konekteblecon. Detalaj instrukcioj troviĝas en [la README de la aplikaĵo](hyperv-studio/README.md#esperanto).
 
 ### Instalado
 
@@ -65,6 +66,7 @@ Pri uzado, defaŭltaj valoroj, preparado de Linuksa ŝablono kaj la kondiĉoj po
 - ISO ライブラリと、OS イメージを選ぶ新規作成画面
 - 複数 NIC の設定、Secure Boot と起動順序の変更
 - 仮想スイッチ、ホスト側 NIC、Hyper-V が報告した IP アドレスをネットワーク一覧で表示
+- 仮想スイッチの作成・削除と、独自の Internal スイッチのホスト側 IPv4 設定
 - 準備済み AlmaLinux / Rocky Linux / RHEL の複製時にホスト名・DHCP を設定
 - ライト / ダーク / システムに合わせる外観設定
 
@@ -74,7 +76,7 @@ Windows 版は起動時に UAC で管理者権限を要求します。Hyper-V �
 
 停止中の VM で「テンプレートとして登録…」を選び、VM 名を完全一致で入力すると、専用の「テンプレート」一覧へ移ります。登録中は、このアプリからの起動・停止・接続・名前変更・削除・ネットワークや起動設定の変更を防ぎます。構成の閲覧と複製はでき、複製先は通常の VM になります。元 VM を変更する場合は、再度 VM 名を完全一致で入力して登録を解除します。解除しても VM とディスクは削除しません。登録だけではゲスト OS の cloud-init 準備は実行しません。保護はこのアプリと Windows ユーザー単位のもので、Hyper-V マネージャー、PowerShell、ほかのツールからの変更は防げません。
 
-「ネットワーク」は、External / Internal / Private の仮想スイッチ、ホスト側 NIC の IP アドレスとプレフィックス長、接続中の VM の NIC を確認する読み取り専用の一覧です。VM 側 IP は Hyper-V が報告した値で、未取得・古い値の場合があります。Internal でも NAT やルーティングにより外部へ接続できる構成があります。一覧では DHCP・NAT の設定や通信可否を判定しません。詳しい操作と、VM が見つからなくなった場合に残ったテンプレート登録を解除する手順は [アプリの README](hyperv-studio/README.md#日本語) を参照してください。
+「ネットワーク」は、External / Internal / Private の仮想スイッチ、ホスト側 NIC の IP アドレスとプレフィックス長、接続中の VM の NIC を表示します。同じ画面からスイッチの作成、未使用スイッチの削除、独自の Internal スイッチのホスト側固定 IPv4 設定も行えます。Default Switch などのシステム管理ネットワークは保護し、削除・IP 変更時はスイッチ名の完全一致を求めます。VM 側 IP は Hyper-V が報告した値で、未取得・古い値の場合があります。Internal でも NAT やルーティングにより外部へ接続できる構成があります。DHCP サーバーや NAT の作成、通信可否の判定は行いません。詳しい手順は [アプリの README](hyperv-studio/README.md#日本語) を参照してください。
 
 ### インストール
 

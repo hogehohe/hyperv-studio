@@ -2,6 +2,7 @@ mod hyperv;
 mod iso_library;
 mod iso_picker;
 mod linux_seed;
+mod network_switches;
 mod vm_templates;
 
 use hyperv::{
@@ -64,6 +65,81 @@ async fn get_network_inventory() -> Result<hyperv::NetworkInventory, String> {
     tauri::async_runtime::spawn_blocking(hyperv::network_inventory)
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn get_network_switch_change_info(
+    state: tauri::State<'_, LibraryState>,
+    switch_id: String,
+) -> Result<network_switches::NetworkSwitchChangeInfo, String> {
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "ネットワーク操作のロックを取得できません。".to_string())?;
+        network_switches::change_info(&switch_id)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn create_network_switch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    request: network_switches::CreateNetworkSwitchRequest,
+) -> Result<network_switches::NetworkSwitchChangeInfo, String> {
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "ネットワーク操作のロックを取得できません。".to_string())?;
+        // The same cross-process lock covers VM attachment changes and switch
+        // operations, so an app instance cannot attach a template during deletion.
+        let _registry = Registry::open(&root)?;
+        network_switches::create(request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn delete_network_switch(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    request: network_switches::DeleteNetworkSwitchRequest,
+) -> Result<network_switches::DeletedNetworkSwitch, String> {
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "ネットワーク操作のロックを取得できません。".to_string())?;
+        let _registry = Registry::open(&root)?;
+        network_switches::delete(request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn save_host_network_ipv4(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    request: network_switches::SaveHostNetworkIpv4Request,
+) -> Result<network_switches::NetworkSwitchChangeInfo, String> {
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "ネットワーク操作のロックを取得できません。".to_string())?;
+        let _registry = Registry::open(&root)?;
+        network_switches::save_ipv4(request)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -458,6 +534,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_host_status,
             get_network_inventory,
+            get_network_switch_change_info,
+            create_network_switch,
+            delete_network_switch,
+            save_host_network_ipv4,
             list_vms,
             list_vm_templates,
             register_vm_template,

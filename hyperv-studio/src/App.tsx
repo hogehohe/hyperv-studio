@@ -216,6 +216,7 @@ function App() {
   const [networkLoading, setNetworkLoading] = useState(false);
   const [networkLoaded, setNetworkLoaded] = useState(false);
   const [networkSaving, setNetworkSaving] = useState(false);
+  const [networkSwitchBusy, setNetworkSwitchBusy] = useState(false);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [bootVm, setBootVm] = useState<VmInfo | null>(null);
   const [bootSettings, setBootSettings] = useState<VmBootSettings | null>(null);
@@ -273,7 +274,7 @@ function App() {
   }
 
   function requestRefresh() {
-    if (operationLock.current || refreshCount.current > 0 || loading || creating || cloning || networkSaving || networkLoading || bootLoading || bootSaving || renaming || deleting || templateSaving || deleteInfoLoading || connectingId !== null || busyId !== null || modalOpen) return;
+    if (operationLock.current || refreshCount.current > 0 || loading || creating || cloning || networkSaving || networkLoading || networkSwitchBusy || bootLoading || bootSaving || renaming || deleting || templateSaving || deleteInfoLoading || connectingId !== null || busyId !== null || modalOpen) return;
     void refresh();
   }
 
@@ -350,7 +351,7 @@ function App() {
   const hostCanManage = host?.can_manage === true;
   const canManage = hostCanManage && templatesKnown && !listError;
   const controlsBusy = loading || creating || cloning || networkLoading || networkSaving || bootLoading || bootSaving || renaming || deleting || templateSaving || deleteInfoLoading || connectingId !== null || busyId !== null || isoLibrary.busy;
-  const pageControlsBusy = controlsBusy || modalOpen;
+  const pageControlsBusy = controlsBusy || modalOpen || networkSwitchBusy;
   const bootChanged = Boolean(bootSettings && (bootSecureBoot !== bootSettings.secure_boot_enabled || bootEntries.length !== bootSettings.boot_entries.length || bootEntries.some((entry, index) => entry.id !== bootSettings.boot_entries[index]?.id)));
   const bootCanEdit = bootSettings !== null && !isProtectedVm(bootSettings.vm_id) && stateKind(bootSettings.state) === "off" && stateKind(vms.find((vm) => vm.id === bootSettings.vm_id)?.state || "") === "off";
   const bootCanSave = bootCanEdit && bootChanged && (bootSettings?.generation !== 2 || bootSecureBoot !== null);
@@ -363,7 +364,7 @@ function App() {
   function isProtectedVm(id: string) { return !templatesKnown || templateMap.has(id.toLowerCase()); }
 
   function selectSection(section: "vms" | "templates" | "network") {
-    if (operationLock.current || modalOpen) return;
+    if (operationLock.current || modalOpen || networkSwitchBusy) return;
     setVmSection(section);
     setSearch("");
     setFilter("all");
@@ -411,7 +412,7 @@ function App() {
   }
 
   function openSettings() {
-    if (!templatesKnown || templateSaving || creating || cloning || busyId || isoLibrary.busy || modalOpen || operationLock.current) return;
+    if (!templatesKnown || templateSaving || creating || cloning || busyId || isoLibrary.busy || modalOpen || networkSwitchBusy || operationLock.current) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSettingsOpen(true);
   }
@@ -771,7 +772,7 @@ function App() {
   }
 
   async function runAction(vm: VmInfo, action: "start" | "stop") {
-    if (!canManage || isProtectedVm(vm.id) || controlsBusy || operationLock.current || refreshCount.current > 0 || createOpen || settingsOpen || cloneSource || networkVm || bootVm || renameTarget || deleteTarget || templateAction) return;
+    if (!canManage || isProtectedVm(vm.id) || controlsBusy || networkSwitchBusy || operationLock.current || refreshCount.current > 0 || createOpen || settingsOpen || cloneSource || networkVm || bootVm || renameTarget || deleteTarget || templateAction) return;
     if (shutdownVm && (action !== "stop" || shutdownVm.id !== vm.id)) return;
     operationLock.current = true;
     setBusyId(vm.id);
@@ -794,7 +795,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="ナビゲーション" inert={modalOpen}>
+      <aside className="sidebar" aria-label="ナビゲーション" inert={modalOpen || networkSwitchBusy}>
         <div className="sidebar-top">
           <div className="brand">
             <span className="brand-mark"><Icon name="server" size={19} /></span>
@@ -833,8 +834,8 @@ function App() {
         </div>
       </aside>
 
-      <main className="main-content" inert={modalOpen}>
-        {vmSection === "network" ? <NetworkInventory disabled={controlsBusy} /> : <>
+      <main className="main-content" inert={modalOpen || networkSwitchBusy}>
+        {vmSection === "network" ? <NetworkInventory disabled={controlsBusy} canManage={canManage} onBusyChange={setNetworkSwitchBusy} onChanged={refresh} /> : <>
         <header className="topbar">
           <div className="topbar-heading">
             <h1 id="vm-list-title">{vmSection === "templates" ? "テンプレート" : "仮想マシン"}</h1>

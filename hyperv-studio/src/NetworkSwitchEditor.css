@@ -1,0 +1,31 @@
+.ns-modal { width: min(100%, 540px); }
+.ns-modal .modal-header > div { min-width: 0; }
+.ns-modal .modal-header p { overflow-wrap: anywhere; }
+.ns-modal form { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.ns-modal .form-field small { line-height: 1.6; overflow-wrap: anywhere; }
+.ns-description { margin: 0 0 17px; color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.ns-note { margin: 15px 0 0; color: var(--text-muted); font-size: 10px; line-height: 1.7; }
+.ns-check { display: flex; align-items: flex-start; gap: 8px; margin: 13px 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; cursor: pointer; }
+.ns-check input { width: 14px; height: 14px; flex: 0 0 14px; margin: 2px 0 0; accent-color: var(--text-secondary); }
+.ns-check small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 10px; }
+.ns-check:has(input:disabled) { cursor: default; }
+.ns-warning, .ns-blocked { margin: 15px 0 0; padding: 11px 13px; color: var(--warning-text); background: var(--warning-bg); border: 1px solid var(--warning-border); border-radius: 6px; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.ns-warning strong { font-weight: 600; }
+.ns-warning p { margin: 5px 0 0; font-size: 10px; }
+.ns-warning .ns-check { margin-bottom: 0; color: var(--warning-text); }
+.ns-review { margin: 0; padding: 12px 13px; background: var(--surface-subtle); border: 1px solid var(--border-subtle); border-radius: 6px; font-size: 11px; line-height: 1.7; }
+.ns-review > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; }
+.ns-review > div + div { margin-top: 10px; }
+.ns-review dt { color: var(--text-muted); }
+.ns-review dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.ns-review dd small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+.ns-review dd code { display: block; font: 10px/1.7 Consolas, "Cascadia Mono", monospace; }
+.ns-ip-fields { display: grid; grid-template-columns: minmax(0, 1fr) 125px; gap: 12px; margin-top: 20px; }
+.ns-ip-fields .form-field { margin-bottom: 0; }
+.ns-confirmation { margin-top: 20px; margin-bottom: 0; }
+.ns-modal .form-errors { margin: 15px 0 0; }
+.ns-saving { margin: 15px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.ns-footer { justify-content: space-between; gap: 8px; }
+.ns-footer > div { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.ns-reload { flex: 0 0 auto; margin-left: -6px; }
+@media (max-width: 600px) { .ns-review > div { grid-template-columns: 92px minmax(0, 1fr); gap: 8px; } }

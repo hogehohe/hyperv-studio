@@ -186,12 +186,18 @@ pub struct SwitchInfo {
     pub external_adapter_description: Option<String>,
     pub host_adapters: Vec<HostNetworkAdapterInfo>,
     pub vm_adapters: Vec<SwitchVmAdapterInfo>,
+    pub is_system_managed: bool,
+    pub can_delete: bool,
+    pub delete_reason: Option<String>,
+    pub can_configure_host_ipv4: bool,
+    pub host_ipv4_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct NetworkInventory {
     pub switches: Vec<SwitchInfo>,
     pub warnings: Vec<String>,
+    pub physical_adapters: Vec<crate::network_switches::PhysicalNetworkAdapter>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -310,7 +316,10 @@ fn spawn_powershell(
     Ok(child)
 }
 
-fn run_action<T: DeserializeOwned>(action: &str, payload: serde_json::Value) -> Result<T, String> {
+pub(crate) fn run_action<T: DeserializeOwned>(
+    action: &str,
+    payload: serde_json::Value,
+) -> Result<T, String> {
     #[cfg(not(windows))]
     {
         let _ = (action, payload);

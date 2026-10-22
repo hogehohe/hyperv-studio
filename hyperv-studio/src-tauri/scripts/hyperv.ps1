@@ -972,114 +972,355 @@ function Invoke-DeleteVm([object] $request) {
     [pscustomobject][ordered]@{ id = $vmId.ToString(); deleted_disk_paths = @($deleted.ToArray()); retained_disk_paths = @($retained.ToArray()); warning = if ($warnings.Count -gt 0) { $warnings -join ' ' } else { $null } }
 }
 
-function Get-NetworkInventory {
-    $switches = @(Get-VMSwitch -ErrorAction Stop | Sort-Object Name)
-    $warnings = New-Object 'System.Collections.Generic.List[string]'
-    $switchViews = New-Object 'System.Collections.Generic.List[object]'
-    $bySwitch = @{}
-    foreach ($switch in $switches) {
-        $id = $switch.Id.ToString().ToLowerInvariant()
-        $item = [pscustomobject]@{
-            id = $id
-            name = [string] $switch.Name
-            switch_type = $switch.SwitchType.ToString()
-            external_adapter_description = $(if ($switch.NetAdapterInterfaceDescription) { [string] $switch.NetAdapterInterfaceDescription } else { $null })
-            host_adapters = New-Object 'System.Collections.Generic.List[object]'
-            vm_adapters = New-Object 'System.Collections.Generic.List[object]'
-        }
-        $switchViews.Add($item)
-        $bySwitch[$id] = $item
-    }
-
-    $vms = @()
-    try { $vms = @(Get-VM -ErrorAction Stop) }
-    catch { $warnings.Add("VMの一覧を取得できません: $($_.Exception.Message)") }
-    foreach ($vm in $vms) {
-        try {
-            foreach ($adapter in @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)) {
-                $switchId = ([string] $adapter.SwitchId).ToLowerInvariant()
-                if (!$bySwitch.ContainsKey($switchId)) { continue }
-                $addresses = @($adapter.IPAddresses | Where-Object { ![string]::IsNullOrWhiteSpace([string] $_) } | ForEach-Object { [string] $_ } | Sort-Object -Unique)
-                $bySwitch[$switchId].vm_adapters.Add([pscustomobject]@{
-                    vm_id = $vm.Id.ToString().ToLowerInvariant()
-                    vm_name = [string] $vm.Name
-                    vm_state = $vm.State.ToString()
-                    adapter_name = [string] $adapter.Name
-                    mac_address = [string] $adapter.MacAddress
-                    ip_addresses = $addresses
-                })
-            }
-        }
-        catch { $warnings.Add("VM「$($vm.Name)」のネットワークを取得できません: $($_.Exception.Message)") }
-    }
-
-    $hostAdapters = @()
-    $netAdapters = @()
-    $ipAddresses = @()
-    try { $hostAdapters = @(Get-VMNetworkAdapter -ManagementOS -ErrorAction Stop) }
-    catch { $warnings.Add("ホスト側の仮想NICを取得できません: $($_.Exception.Message)") }
-    try { $netAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop) }
-    catch { $warnings.Add("ホスト側のNIC情報を取得できません: $($_.Exception.Message)") }
-    try { $ipAddresses = @(Get-NetIPAddress -ErrorAction Stop) }
-    catch { $warnings.Add("ホスト側のIPアドレスを取得できません: $($_.Exception.Message)") }
-
-    foreach ($adapter in $hostAdapters) {
-        $switchId = ([string] $adapter.SwitchId).ToLowerInvariant()
-        if (!$bySwitch.ContainsKey($switchId)) { continue }
-        $matches = @()
-        $deviceId = [guid]::Empty
-        if ([guid]::TryParse([string] $adapter.DeviceId, [ref] $deviceId) -and $deviceId -ne [guid]::Empty) {
-            $matches = @($netAdapters | Where-Object {
-                $interfaceId = [guid]::Empty
-                [guid]::TryParse([string] $_.InterfaceGuid, [ref] $interfaceId) -and $interfaceId -eq $deviceId
-            })
-        }
-        if ($matches.Count -eq 0) {
-            $mac = ([string] $adapter.MacAddress) -replace '[^0-9a-fA-F]', ''
-            if ($mac.Length -eq 12) {
-                $matches = @($netAdapters | Where-Object {
-                    (([string] $_.MacAddress) -replace '[^0-9a-fA-F]', '') -ieq $mac
-                })
-            }
-        }
-        if ($matches.Count -eq 1) {
-            $net = $matches[0]
-            $addresses = @($ipAddresses | Where-Object { $_.InterfaceIndex -eq $net.ifIndex -and $_.IPAddress } | ForEach-Object {
-                '{0}/{1}' -f $_.IPAddress, $_.PrefixLength
-            } | Sort-Object -Unique)
-            $bySwitch[$switchId].host_adapters.Add([pscustomobject]@{
-                name = [string] $net.Name
-                interface_description = [string] $net.InterfaceDescription
-                mac_address = [string] $adapter.MacAddress
-                ip_addresses = $addresses
-                status = [string] $net.Status
-            })
-        }
-        else {
-            $warnings.Add("スイッチ「$($bySwitch[$switchId].name)」のホスト側NICを一意に対応付けられないため、IPを表示できません。")
-            $bySwitch[$switchId].host_adapters.Add([pscustomobject]@{
-                name = [string] $adapter.Name
-                interface_description = ''
-                mac_address = [string] $adapter.MacAddress
-                ip_addresses = @()
-                status = 'Unknown'
-            })
-        }
-    }
-
-    $views = @($switchViews | ForEach-Object {
-        [pscustomobject]@{
-            id = $_.id
-            name = $_.name
-            switch_type = $_.switch_type
-            external_adapter_description = $_.external_adapter_description
-            host_adapters = @($_.host_adapters.ToArray())
-            vm_adapters = @($_.vm_adapters.ToArray() | Sort-Object vm_name, adapter_name)
-        }
-    })
-    [pscustomobject]@{ switches = $views; warnings = @($warnings.ToArray()) }
+function Convert-NetworkGuid([object] $value) {
+    $id = [guid]::Empty
+    if ([guid]::TryParse([string] $value, [ref] $id) -and $id -ne [guid]::Empty) { return $id.ToString().ToLowerInvariant() }
+    return ''
 }
 
+function Assert-NetworkGuid([object] $value) {
+    $text = [string] $value
+    if ($text -cnotmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' -or !(Convert-NetworkGuid $text)) { throw 'ネットワークの識別子が正しくありません。再読み込みしてください。' }
+    Convert-NetworkGuid $text
+}
+
+function Assert-NetworkName([object] $value) {
+    if ($value -isnot [string] -or !$value -or $value.Length -gt 256 -or $value -cne $value.Trim() -or $value -match '[\x00-\x1f\x7f]') { throw 'スイッチ名には前後の空白と制御文字を含まない1〜256文字を指定してください。' }
+    [string] $value
+}
+
+function Get-NetworkSwitchContext {
+    $switches = @(Get-VMSwitch -ErrorAction Stop | Sort-Object Id)
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+    $vmAdapters = New-Object 'System.Collections.Generic.List[object]'
+    $vms = @(); $hostAdapters = @(); $netAdapters = @(); $addresses = @(); $persistentAddresses = @(); $interfaces = @(); $persistentInterfaces = @(); $routes = @(); $persistentRoutes = @(); $hns = @(); $physical = @()
+    try { $vms = @(Get-VM -ErrorAction Stop) } catch { $errors.Add("VMの一覧を取得できません: $($_.Exception.Message)") }
+    foreach ($vm in $vms) {
+        try { foreach ($adapter in @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)) { $vmAdapters.Add([pscustomobject]@{ vm = $vm; adapter = $adapter }) } }
+        catch { $errors.Add("VM「$($vm.Name)」のネットワークを取得できません: $($_.Exception.Message)") }
+    }
+    try { $hostAdapters = @(Get-VMNetworkAdapter -ManagementOS -ErrorAction Stop) } catch { $errors.Add("ホスト側の仮想NICを取得できません: $($_.Exception.Message)") }
+    try { $netAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop) } catch { $errors.Add("ホスト側のNIC情報を取得できません: $($_.Exception.Message)") }
+    try { $addresses = @(Get-NetIPAddress -PolicyStore ActiveStore -ErrorAction Stop) } catch { $errors.Add("ホスト側のIPアドレスを取得できません: $($_.Exception.Message)") }
+    # Filtering NetTCPIP queries server-side can throw ObjectNotFound for a
+    # perfectly valid empty result (notably PersistentStore routes). Enumerate
+    # the store and filter locally, keeping genuine access/provider errors fatal.
+    try { $persistentAddresses = @(Get-NetIPAddress -PolicyStore PersistentStore -ErrorAction Stop | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }) } catch { $errors.Add("保存済みIPv4アドレスを取得できません: $($_.Exception.Message)") }
+    try { $interfaces = @(Get-NetIPInterface -PolicyStore ActiveStore -ErrorAction Stop | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }) } catch { $errors.Add("IPv4のDHCP設定を取得できません: $($_.Exception.Message)") }
+    try { $persistentInterfaces = @(Get-NetIPInterface -PolicyStore PersistentStore -ErrorAction Stop | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }) } catch { $errors.Add("保存済みDHCP設定を取得できません: $($_.Exception.Message)") }
+    try { $routes = @(Get-NetRoute -PolicyStore ActiveStore -ErrorAction Stop | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }) } catch { $errors.Add("IPv4ルートを取得できません: $($_.Exception.Message)") }
+    try { $persistentRoutes = @(Get-NetRoute -PolicyStore PersistentStore -ErrorAction Stop | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }) } catch { $errors.Add("保存済みIPv4ルートを取得できません: $($_.Exception.Message)") }
+    try {
+        if (Get-Command Get-HnsNetwork -ErrorAction SilentlyContinue) { $hns = @(Get-HnsNetwork -ErrorAction Stop) }
+        elseif (@(Get-Service -ErrorAction Stop | Where-Object { $_.Name -eq 'hns' }).Count -gt 0) { throw 'HNSサービスが存在しますが、その管理ネットワークを取得できません。' }
+    }
+    catch { $errors.Add("Windows管理ネットワークを確認できません: $($_.Exception.Message)") }
+    $physicalError = $null
+    try { $physical = @(Get-NetAdapter -Physical -IncludeHidden -ErrorAction Stop) } catch { $physicalError = "物理NICを取得できません: $($_.Exception.Message)" }
+    [pscustomobject]@{ switches = $switches; vm_adapters = @($vmAdapters.ToArray()); host_adapters = $hostAdapters; net_adapters = $netAdapters; addresses = $addresses; persistent_addresses = $persistentAddresses; interfaces = $interfaces; persistent_interfaces = $persistentInterfaces; routes = $routes; persistent_routes = $persistentRoutes; hns = $hns; physical_adapters = $physical; physical_error = $physicalError; errors = @($errors.ToArray()) }
+}
+
+function Test-SystemNetworkSwitch([object] $switch, [object[]] $hnsNetworks) {
+    $id = Convert-NetworkGuid $switch.Id
+    if ($id -eq 'c08cb7b8-9b3c-408e-8e30-5e16a3aeb444' -or [string] $switch.Name -ieq 'Default Switch' -or [string] $switch.SwitchType -eq 'Ics') { return $true }
+    foreach ($property in @('IsSystemManaged', 'IsAutomatic', 'IsDefault')) {
+        if ($switch.PSObject.Properties[$property] -and $switch.$property -eq $true) { return $true }
+    }
+    foreach ($network in $hnsNetworks) {
+        if ((Convert-NetworkGuid $network.Id) -eq $id -or (Convert-NetworkGuid $network.SwitchGuid) -eq $id -or [string]::Equals([string] $network.Name, [string] $switch.Name, [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    $false
+}
+
+function Find-NetworkHostAdapter([object] $adapter, [object[]] $netAdapters, [bool] $allowMacFallback = $true) {
+    $deviceId = Convert-NetworkGuid $adapter.DeviceId
+    $matches = @()
+    if ($deviceId) { $matches = @($netAdapters | Where-Object { (Convert-NetworkGuid $_.InterfaceGuid) -eq $deviceId }) }
+    if ($matches.Count -eq 0 -and $allowMacFallback) {
+        $mac = ([string] $adapter.MacAddress) -replace '[^0-9a-fA-F]', ''
+        if ($mac.Length -eq 12) { $matches = @($netAdapters | Where-Object { (([string] $_.MacAddress) -replace '[^0-9a-fA-F]', '') -ieq $mac }) }
+    }
+    if ($matches.Count -eq 1) { return $matches[0] }
+    $null
+}
+
+function Get-NetworkRevision([object] $value) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $value -Depth 12 -Compress))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+function Get-NetworkAddressFootprint([object[]] $addresses) {
+    @($addresses | ForEach-Object { [pscustomobject][ordered]@{ index = [int] $_.InterfaceIndex; address = [string] $_.IPAddress; prefix = [int] $_.PrefixLength; origin = [string] $_.PrefixOrigin; suffix_origin = [string] $_.SuffixOrigin; skip_as_source = [bool] $_.SkipAsSource } } | Sort-Object index, address, prefix)
+}
+
+function Get-NetworkRouteFootprint([object[]] $routes) {
+    @($routes | ForEach-Object { [pscustomobject][ordered]@{ index = [int] $_.InterfaceIndex; destination = [string] $_.DestinationPrefix; next_hop = [string] $_.NextHop; metric = [int] $_.RouteMetric; protocol = [string] $_.Protocol } } | Sort-Object index, destination, next_hop, metric)
+}
+
+function Get-NetworkSwitchSnapshot([string] $switchId, [object] $context = $null) {
+    $switchId = Assert-NetworkGuid $switchId
+    if ($null -eq $context) { $context = Get-NetworkSwitchContext }
+    $matches = @($context.switches | Where-Object { (Convert-NetworkGuid $_.Id) -eq $switchId })
+    if ($matches.Count -ne 1) { throw '対象の仮想スイッチが見つかりません。再読み込みしてください。' }
+    $switch = $matches[0]
+    $managed = Test-SystemNetworkSwitch $switch @($context.hns)
+    $vmAdapters = @($context.vm_adapters | Where-Object { (Convert-NetworkGuid $_.adapter.SwitchId) -eq $switchId })
+    $hostAdapters = @($context.host_adapters | Where-Object { (Convert-NetworkGuid $_.SwitchId) -eq $switchId })
+    $hostViews = @($hostAdapters | ForEach-Object {
+        $adapter = $_; $net = Find-NetworkHostAdapter $adapter @($context.net_adapters)
+        $index = if ($null -ne $net) { [int] $net.ifIndex } else { 0 }
+        $settings = @($context.interfaces | Where-Object { $_.InterfaceIndex -eq $index })
+        [pscustomobject]@{ name = if ($null -ne $net) { [string] $net.Name } else { [string] $adapter.Name }; interface_guid = if ($null -ne $net) { Convert-NetworkGuid $net.InterfaceGuid } else { '' }; interface_index = $index; mac_address = [string] $adapter.MacAddress; ip_addresses = @($context.addresses | Where-Object { $_.InterfaceIndex -eq $index } | ForEach-Object { '{0}/{1}' -f $_.IPAddress, $_.PrefixLength } | Sort-Object -Unique); dhcp = if ($settings.Count -eq 1) { [string] $settings[0].Dhcp } else { 'Unknown' }; status = if ($null -ne $net) { [string] $net.Status } else { 'Unknown' } }
+    })
+    $reason = $null; $hostReason = $null; $hostIpv4 = $null; $targetNet = $null
+    if ($managed) { $reason = 'WindowsまたはHNSが管理するスイッチは変更できません。' }
+    elseif ($context.errors.Count -gt 0) { $reason = '安全確認に必要な情報を取得できません。' + ($context.errors -join ' ') }
+    elseif ($vmAdapters.Count -gt 0) { $reason = 'VMのNICが接続されています。先に各VMの接続先を変更または解除してください。' }
+    if ($managed) { $hostReason = 'WindowsまたはHNSが管理するスイッチのIPは変更できません。' }
+    elseif ($context.errors.Count -gt 0) { $hostReason = '安全確認に必要な情報を取得できません。' + ($context.errors -join ' ') }
+    elseif ([string] $switch.SwitchType -cne 'Internal') { $hostReason = 'ホスト側IPv4の設定は内部（Internal）スイッチだけで使用できます。' }
+    elseif ($hostAdapters.Count -ne 1) { $hostReason = 'ホスト側の仮想NICを一意に確認できません。' }
+    else {
+        # For mutations a DeviceId/InterfaceGuid match is mandatory. MAC/name
+        # fallbacks are useful for display, but cannot identify a write target.
+        $targetNet = Find-NetworkHostAdapter $hostAdapters[0] @($context.net_adapters) $false
+        if ($null -eq $targetNet -or !(Convert-NetworkGuid $targetNet.InterfaceGuid) -or [int] $targetNet.ifIndex -le 0) { $hostReason = 'ホスト側NICのGUIDを一意に対応付けられません。' }
+        else {
+            $index = [int] $targetNet.ifIndex
+            $settings = @($context.interfaces | Where-Object { $_.InterfaceIndex -eq $index })
+            $persistentSettings = @($context.persistent_interfaces | Where-Object { $_.InterfaceIndex -eq $index })
+            $defaultRoutes = @(@($context.routes) + @($context.persistent_routes) | Where-Object { $_.InterfaceIndex -eq $index -and $_.DestinationPrefix -eq '0.0.0.0/0' })
+            $hostIpv4 = [pscustomobject]@{ interface_guid = Convert-NetworkGuid $targetNet.InterfaceGuid; interface_index = $index; interface_name = [string] $targetNet.Name; dhcp = if ($settings.Count -eq 1) { [string] $settings[0].Dhcp } else { 'Unknown' }; addresses = @($context.addresses | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' } | ForEach-Object { [pscustomobject]@{ ip_address = [string] $_.IPAddress; prefix_length = [int] $_.PrefixLength } } | Sort-Object ip_address, prefix_length); has_default_gateway = $defaultRoutes.Count -gt 0 }
+            if ($settings.Count -ne 1 -or $persistentSettings.Count -ne 1 -or [string] $settings[0].Dhcp -notin @('Enabled','Disabled') -or [string] $persistentSettings[0].Dhcp -notin @('Enabled','Disabled')) { $hostReason = '現在と保存済みのDHCP設定を確認できません。' }
+            elseif ($defaultRoutes.Count -gt 0) { $hostReason = 'このNICにデフォルトゲートウェイがあります。ホストの通信経路を保護するため、ここでは変更できません。' }
+            else {
+                $activeIpv4 = @($context.addresses | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' })
+                $savedIpv4 = @($context.persistent_addresses | Where-Object { $_.InterfaceIndex -eq $index })
+                foreach ($address in @($activeIpv4) + @($savedIpv4)) {
+                    if ([string] $address.Type -ne 'Unicast') { $hostReason = '特殊なIPv4アドレス種別があるため、ここでは変更できません。'; break }
+                    if ([string] $address.PrefixOrigin -eq 'Manual' -and ($address.ValidLifetime -ne [TimeSpan]::MaxValue -or $address.PreferredLifetime -ne [TimeSpan]::MaxValue)) { $hostReason = '有効期間付きの手動IPv4設定は、ここでは変更できません。'; break }
+                }
+                if (@($savedIpv4 | Where-Object { [string] $_.PrefixOrigin -ne 'Manual' }).Count -gt 0 -or ([string] $settings[0].Dhcp -eq 'Disabled' -and @($activeIpv4 | Where-Object { [string] $_.PrefixOrigin -ne 'Manual' }).Count -gt 0)) { $hostReason = '元に戻せることを確認できない自動IPv4設定があるため、ここでは変更できません。' }
+                foreach ($address in $activeIpv4) {
+                    $savedSame = @($savedIpv4 | Where-Object { $_.IPAddress -eq $address.IPAddress })
+                    if ($savedSame.Count -gt 1 -or ($savedSame.Count -eq 1 -and ($savedSame[0].PrefixLength -ne $address.PrefixLength -or [bool] $savedSame[0].SkipAsSource -ne [bool] $address.SkipAsSource))) { $hostReason = '現在と保存済みで異なるIPv4の詳細設定があるため、ここでは変更できません。'; break }
+                }
+            }
+        }
+    }
+    $footprint = [pscustomobject][ordered]@{
+        switch = [pscustomobject][ordered]@{ id = $switchId; name = [string] $switch.Name; type = [string] $switch.SwitchType; managed = $managed; sharing = [bool] $switch.AllowManagementOS; physical_guid = [string] $switch.NetAdapterInterfaceGuid; physical_descriptions = @($switch.NetAdapterInterfaceDescriptions); physical_description = [string] $switch.NetAdapterInterfaceDescription }
+        errors = @($context.errors | Sort-Object)
+        vms = @($vmAdapters | ForEach-Object { [pscustomobject][ordered]@{ vm_id = Convert-NetworkGuid $_.vm.Id; vm_name = [string] $_.vm.Name; adapter_id = [string] $_.adapter.Id; adapter_name = [string] $_.adapter.Name; switch_id = [string] $_.adapter.SwitchId; mac = [string] $_.adapter.MacAddress } } | Sort-Object vm_id, adapter_id)
+        hosts = @($hostAdapters | ForEach-Object { [pscustomobject][ordered]@{ id = [string] $_.Id; device_id = [string] $_.DeviceId; name = [string] $_.Name; mac = [string] $_.MacAddress } } | Sort-Object id, device_id)
+        net_adapters = @($context.net_adapters | ForEach-Object { [pscustomobject][ordered]@{ guid = Convert-NetworkGuid $_.InterfaceGuid; index = [int] $_.ifIndex; name = [string] $_.Name; mac = [string] $_.MacAddress } } | Sort-Object guid, index)
+        active_addresses = @(Get-NetworkAddressFootprint @($context.addresses | Where-Object { [string] $_.AddressFamily -eq 'IPv4' }))
+        persistent_addresses = @(Get-NetworkAddressFootprint @($context.persistent_addresses))
+        interfaces = @($context.interfaces | ForEach-Object { [pscustomobject][ordered]@{ index = [int] $_.InterfaceIndex; dhcp = [string] $_.Dhcp } } | Sort-Object index)
+        persistent_interfaces = @($context.persistent_interfaces | ForEach-Object { [pscustomobject][ordered]@{ index = [int] $_.InterfaceIndex; dhcp = [string] $_.Dhcp } } | Sort-Object index)
+        routes = @(Get-NetworkRouteFootprint @($context.routes)); persistent_routes = @(Get-NetworkRouteFootprint @($context.persistent_routes))
+    }
+    $view = [pscustomobject]@{ switch_id = $switchId; name = [string] $switch.Name; switch_type = [string] $switch.SwitchType; revision = Get-NetworkRevision $footprint; is_system_managed = $managed; can_delete = $null -eq $reason; delete_reason = $reason; can_configure_host_ipv4 = $null -eq $hostReason; host_ipv4_reason = $hostReason; vm_adapter_count = $vmAdapters.Count; host_adapters = $hostViews; host_ipv4 = $hostIpv4 }
+    [pscustomobject]@{ view = $view; switch = $switch; context = $context; target_net = $targetNet }
+}
+
+function Get-PhysicalNetworkAdapterViews([object] $context) {
+    @($context.physical_adapters | ForEach-Object {
+        $adapter = $_; $id = Convert-NetworkGuid $adapter.InterfaceGuid; $reason = $context.physical_error
+        if ($context.errors.Count -gt 0) { $reason = '安全確認に必要な情報を取得できません。' + ($context.errors -join ' ') }
+        if (!$id) { $reason = '物理NICのGUIDを確認できません。' }
+        elseif (@($context.net_adapters | Where-Object { (Convert-NetworkGuid $_.InterfaceGuid) -eq $id }).Count -ne 1) { $reason = '物理NICを一意に対応付けられません。' }
+        elseif (@($context.switches | Where-Object { (Convert-NetworkGuid $_.NetAdapterInterfaceGuid) -eq $id -or @($_.NetAdapterInterfaceDescriptions) -contains [string] $adapter.InterfaceDescription -or [string]::Equals([string] $_.NetAdapterInterfaceDescription, [string] $adapter.InterfaceDescription, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { $reason = '既存の仮想スイッチに割り当て済みです。' }
+        [pscustomobject]@{ interface_guid = $id; name = [string] $adapter.Name; interface_description = [string] $adapter.InterfaceDescription; mac_address = [string] $adapter.MacAddress; status = [string] $adapter.Status; available = $null -eq $reason; unavailable_reason = $reason }
+    } | Sort-Object name)
+}
+
+function Assert-NetworkChangeRequest([object] $request) {
+    $id = Assert-NetworkGuid $request.switch_id
+    if ($request.expected_revision -isnot [string] -or [string] $request.expected_revision -cnotmatch '^[0-9a-f]{64}$') { throw '取得時のネットワーク設定を確認できません。再読み込みしてください。' }
+    $name = Assert-NetworkName $request.confirmation_name
+    $snapshot = Get-NetworkSwitchSnapshot $id
+    if ($snapshot.view.revision -cne $request.expected_revision) { throw 'ネットワーク構成が取得後に変わりました。再読み込みしてやり直してください。' }
+    if ($snapshot.view.name -cne $name) { throw '確認用のスイッチ名が一致しません。' }
+    $snapshot
+}
+
+function Invoke-CreateNetworkSwitch([object] $request) {
+    $name = Assert-NetworkName $request.name
+    if ($request.switch_type -isnot [string] -or [string] $request.switch_type -cnotin @('External','Internal','Private')) { throw '仮想スイッチの種類が正しくありません。' }
+    if ($request.allow_management_os -isnot [bool] -or $request.external_impact_confirmed -isnot [bool]) { throw 'ホスト共有と通信影響の確認が正しくありません。' }
+    if ($name -ieq 'Default Switch') { throw 'Windows管理スイッチの予約名は使用できません。' }
+    $context = Get-NetworkSwitchContext
+    if (@($context.switches | Where-Object { [string]::Equals([string] $_.Name, $name, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) { throw '同名の仮想スイッチがすでに存在します。' }
+    if ($request.switch_type -ceq 'External') {
+        if (!$request.external_impact_confirmed) { throw '外部スイッチの作成によるホスト通信への影響を確認してください。' }
+        if ($context.errors.Count -gt 0 -or $context.physical_error) { throw '物理NICの安全確認を完了できません。' + ($context.errors -join ' ') + $context.physical_error }
+        $physicalId = Assert-NetworkGuid $request.physical_adapter_guid
+        $views = @(Get-PhysicalNetworkAdapterViews $context | Where-Object { $_.interface_guid -eq $physicalId })
+        if ($views.Count -ne 1 -or !$views[0].available) { throw '選択した物理NICは使用できません。再読み込みしてください。' }
+        $adapters = @($context.physical_adapters | Where-Object { (Convert-NetworkGuid $_.InterfaceGuid) -eq $physicalId })
+        if ($adapters.Count -ne 1) { throw '物理NICを一意に確認できません。' }
+        # Resolve the stable GUID freshly, then use its exact description rather
+        # than treating an adapter name supplied by the UI as a target.
+        $description = [string] $adapters[0].InterfaceDescription
+        if (!$description -or @($context.net_adapters | Where-Object { [string]::Equals([string] $_.InterfaceDescription, $description, [StringComparison]::OrdinalIgnoreCase) }).Count -ne 1) { throw '物理NICの識別情報が重複しています。' }
+        $created = New-VMSwitch -Name $name -NetAdapterInterfaceDescription $description -AllowManagementOS ([bool] $request.allow_management_os) -ErrorAction Stop
+    }
+    else {
+        if ($null -ne $request.physical_adapter_guid -and [string] $request.physical_adapter_guid -ne '') { throw '内部・プライベートスイッチに物理NICは指定できません。' }
+        $created = New-VMSwitch -Name $name -SwitchType ([string] $request.switch_type) -ErrorAction Stop
+    }
+    # Successful creation must not be reported as failed merely because the new
+    # host NIC is still appearing. Snapshot errors become denied capabilities.
+    $createdId = Assert-NetworkGuid ([string] $created.Id)
+    try { (Get-NetworkSwitchSnapshot $createdId).view }
+    catch {
+        $reason = "スイッチは作成されましたが、作成後の詳細を取得できません。ネットワーク画面を再読み込みしてください。 $($_.Exception.Message)"
+        [pscustomobject]@{ switch_id = $createdId; name = $name; switch_type = [string] $request.switch_type; revision = Get-NetworkRevision ([pscustomobject]@{ id = $createdId; created = $true }); is_system_managed = $false; can_delete = $false; delete_reason = $reason; can_configure_host_ipv4 = $false; host_ipv4_reason = $reason; vm_adapter_count = 0; host_adapters = @(); host_ipv4 = $null }
+    }
+}
+
+function Invoke-DeleteNetworkSwitch([object] $request) {
+    $snapshot = Assert-NetworkChangeRequest $request
+    if (!$snapshot.view.can_delete) { throw $snapshot.view.delete_reason }
+    Remove-VMSwitch -VMSwitch $snapshot.switch -Force -Confirm:$false -ErrorAction Stop
+    [pscustomobject]@{ switch_id = $snapshot.view.switch_id; name = $snapshot.view.name }
+}
+
+function Convert-StrictHostIpv4([object] $address, [object] $prefix) {
+    if ($address -isnot [string] -or [string] $address -cnotmatch '^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})$' -or $prefix -isnot [ValueType] -or $prefix -is [bool] -or [double] $prefix -ne [Math]::Truncate([double] $prefix) -or [int] $prefix -lt 1 -or [int] $prefix -gt 30) { throw 'IPv4アドレスと1〜30のプレフィックス長を指定してください。' }
+    $ip = $null
+    if (![Net.IPAddress]::TryParse([string] $address, [ref] $ip) -or $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw 'IPv4アドレスが正しくありません。' }
+    $octets = $ip.GetAddressBytes()
+    if ($octets[0] -eq 0 -or $octets[0] -eq 127 -or $octets[0] -ge 224) { throw 'ホストに割り当て可能なユニキャストIPv4アドレスを指定してください。' }
+    $number = [uint64] $octets[0] * 16777216 + [uint64] $octets[1] * 65536 + [uint64] $octets[2] * 256 + [uint64] $octets[3]
+    $size = [uint64] [Math]::Pow(2, 32 - [int] $prefix)
+    $network = $number - ($number % $size); $broadcast = $network + $size - 1
+    if ($number -eq $network -or $number -eq $broadcast) { throw 'ネットワークアドレスまたはブロードキャストアドレスはホストに割り当てられません。' }
+    [pscustomobject]@{ address = $ip.ToString(); prefix = [int] $prefix; start = $network; end = $broadcast }
+}
+
+function Assert-NoHostIpv4Overlap([object] $target, [object] $snapshot) {
+    $index = [int] $snapshot.target_net.ifIndex
+    foreach ($address in @($snapshot.context.addresses) + @($snapshot.context.persistent_addresses)) {
+        if ($address.InterfaceIndex -eq $index -or [string] $address.AddressFamily -ne 'IPv4') { continue }
+        $ip = $null
+        if (![Net.IPAddress]::TryParse([string] $address.IPAddress, [ref] $ip) -or $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { throw '既存のIPv4アドレスを検証できません。' }
+        $octets = $ip.GetAddressBytes(); if ($octets[0] -eq 127) { continue }
+        $number = [uint64] $octets[0] * 16777216 + [uint64] $octets[1] * 65536 + [uint64] $octets[2] * 256 + [uint64] $octets[3]
+        $length = [int] $address.PrefixLength
+        if ($length -lt 0 -or $length -gt 32) { throw '既存のIPv4プレフィックスを検証できません。' }
+        $size = [uint64] [Math]::Pow(2, 32 - $length); $start = $number - ($number % $size); $end = $start + $size - 1
+        if ($target.start -le $end -and $start -le $target.end) { throw "指定したIPv4ネットワークが別のホストNIC（$($address.InterfaceAlias)、$($address.IPAddress)/$length）と重複します。" }
+    }
+}
+
+function Assert-HostNetworkTarget([object] $snapshot) {
+    $guid = Convert-NetworkGuid $snapshot.target_net.InterfaceGuid
+    $matches = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop | Where-Object { (Convert-NetworkGuid $_.InterfaceGuid) -eq $guid })
+    if ($matches.Count -ne 1 -or [int] $matches[0].ifIndex -ne [int] $snapshot.target_net.ifIndex) { throw '操作中にホストNICの識別情報が変わりました。再読み込みしてください。' }
+}
+
+function Clear-HostIpv4Addresses([object] $snapshot) {
+    foreach ($store in @('PersistentStore', 'ActiveStore')) {
+        Assert-HostNetworkTarget $snapshot
+        foreach ($address in @(Get-NetIPAddress -PolicyStore $store -ErrorAction Stop | Where-Object { $_.InterfaceIndex -eq [int] $snapshot.target_net.ifIndex -and [string] $_.AddressFamily -eq 'IPv4' })) {
+            Remove-NetIPAddress -InterfaceIndex ([int] $snapshot.target_net.ifIndex) -AddressFamily IPv4 -IPAddress ([string] $address.IPAddress) -PrefixLength ([byte] $address.PrefixLength) -PolicyStore $store -Confirm:$false -ErrorAction Stop
+        }
+    }
+}
+
+function Restore-HostIpv4([object] $snapshot) {
+    Assert-HostNetworkTarget $snapshot
+    $index = [int] $snapshot.target_net.ifIndex
+    Clear-HostIpv4Addresses $snapshot
+    $active = @($snapshot.context.addresses | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' -and [string] $_.PrefixOrigin -eq 'Manual' })
+    $persistent = @($snapshot.context.persistent_addresses | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.PrefixOrigin -eq 'Manual' })
+    foreach ($address in $persistent) {
+        New-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -IPAddress ([string] $address.IPAddress) -PrefixLength ([byte] $address.PrefixLength) -SkipAsSource ([bool] $address.SkipAsSource) -ValidLifetime $address.ValidLifetime -PreferredLifetime $address.PreferredLifetime -ErrorAction Stop | Out-Null
+    }
+    foreach ($address in $active) {
+        if (@($persistent | Where-Object { $_.IPAddress -eq $address.IPAddress -and $_.PrefixLength -eq $address.PrefixLength }).Count -eq 0) {
+            New-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -IPAddress ([string] $address.IPAddress) -PrefixLength ([byte] $address.PrefixLength) -SkipAsSource ([bool] $address.SkipAsSource) -ValidLifetime $address.ValidLifetime -PreferredLifetime $address.PreferredLifetime -PolicyStore ActiveStore -ErrorAction Stop | Out-Null
+        }
+    }
+    foreach ($address in $persistent) {
+        if (@($active | Where-Object { $_.IPAddress -eq $address.IPAddress -and $_.PrefixLength -eq $address.PrefixLength }).Count -eq 0) {
+            Remove-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -IPAddress ([string] $address.IPAddress) -PrefixLength ([byte] $address.PrefixLength) -PolicyStore ActiveStore -Confirm:$false -ErrorAction Stop
+        }
+    }
+    foreach ($store in @('PersistentStore', 'ActiveStore')) {
+        $settings = if ($store -eq 'ActiveStore') { @($snapshot.context.interfaces | Where-Object { $_.InterfaceIndex -eq $index }) } else { @($snapshot.context.persistent_interfaces | Where-Object { $_.InterfaceIndex -eq $index }) }
+        Assert-HostNetworkTarget $snapshot
+        Set-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4 -Dhcp ([string] $settings[0].Dhcp) -PolicyStore $store -ErrorAction Stop
+        $restoredSettings = @(Get-NetIPInterface -PolicyStore $store -ErrorAction Stop | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' })
+        $restoredAddresses = @(Get-NetIPAddress -PolicyStore $store -ErrorAction Stop | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' -and [string] $_.PrefixOrigin -eq 'Manual' })
+        $expectedAddresses = @(if ($store -eq 'ActiveStore') { $active } else { $persistent })
+        if ($restoredSettings.Count -ne 1 -or [string] $restoredSettings[0].Dhcp -ne [string] $settings[0].Dhcp -or (Get-NetworkRevision @(Get-NetworkAddressFootprint $restoredAddresses)) -cne (Get-NetworkRevision @(Get-NetworkAddressFootprint $expectedAddresses))) { throw '元のDHCP・手動IPv4設定の復元結果を確認できません。' }
+    }
+}
+
+function Save-HostNetworkIpv4([object] $request) {
+    $target = Convert-StrictHostIpv4 $request.ip_address $request.prefix_length
+    $snapshot = Assert-NetworkChangeRequest $request
+    if (!$snapshot.view.can_configure_host_ipv4) { throw $snapshot.view.host_ipv4_reason }
+    Assert-NoHostIpv4Overlap $target $snapshot
+    Assert-HostNetworkTarget $snapshot
+    $index = [int] $snapshot.target_net.ifIndex
+    try {
+        foreach ($store in @('PersistentStore', 'ActiveStore')) { Set-NetIPInterface -InterfaceIndex $index -AddressFamily IPv4 -Dhcp Disabled -PolicyStore $store -ErrorAction Stop }
+        Clear-HostIpv4Addresses $snapshot
+        Assert-HostNetworkTarget $snapshot
+        # Omitting PolicyStore persists the address and creates its active copy.
+        New-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -IPAddress $target.address -PrefixLength ([byte] $target.prefix) -ErrorAction Stop | Out-Null
+        $result = Get-NetworkSwitchSnapshot $snapshot.view.switch_id
+        if (!$result.view.can_configure_host_ipv4 -or $result.view.host_ipv4.dhcp -ne 'Disabled') { throw '設定後のホスト側IPv4を確認できません。' }
+        $active = @($result.context.addresses | Where-Object { $_.InterfaceIndex -eq $index -and [string] $_.AddressFamily -eq 'IPv4' })
+        $saved = @($result.context.persistent_addresses | Where-Object { $_.InterfaceIndex -eq $index })
+        if ($active.Count -ne 1 -or $saved.Count -ne 1 -or $active[0].IPAddress -ne $target.address -or $active[0].PrefixLength -ne $target.prefix -or $saved[0].IPAddress -ne $target.address -or $saved[0].PrefixLength -ne $target.prefix -or [string] $active[0].AddressState -in @('Duplicate','Invalid')) { throw '指定したIPv4の保存結果を確認できません。' }
+        for ($attempt = 0; [string] $active[0].AddressState -eq 'Tentative' -and $attempt -lt 10; $attempt++) {
+            Start-Sleep -Milliseconds 500
+            Assert-HostNetworkTarget $snapshot
+            $active = @(Get-NetIPAddress -InterfaceIndex $index -AddressFamily IPv4 -PolicyStore ActiveStore -ErrorAction Stop | Where-Object { $_.IPAddress -eq $target.address -and $_.PrefixLength -eq $target.prefix })
+            if ($active.Count -ne 1) { throw 'IPv4アドレスの重複確認中に設定が変わりました。' }
+        }
+        if ([string] $active[0].AddressState -notin @('Preferred','Deprecated')) { throw 'IPv4アドレスの重複確認が完了しないか、アドレスを使用できません。' }
+        $result.view
+    }
+    catch {
+        $failure = $_.Exception.Message
+        try { Restore-HostIpv4 $snapshot }
+        catch { throw "IPv4の変更に失敗し、元の設定の復元も完了できませんでした。ホストのネットワーク設定を確認してください。変更: $failure 復元: $($_.Exception.Message)" }
+        throw "IPv4の変更に失敗したため、元の手動IPv4設定とDHCP設定を復元しました。DHCPによるIPは再取得され、以前と変わる場合があります。 $failure"
+    }
+}
+
+function Get-NetworkInventory {
+    $context = Get-NetworkSwitchContext
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($message in $context.errors) { $warnings.Add($message) }
+    if ($context.physical_error) { $warnings.Add($context.physical_error) }
+    $views = @($context.switches | Sort-Object Name | ForEach-Object {
+        $switch = $_; $id = Convert-NetworkGuid $switch.Id
+        $snapshot = Get-NetworkSwitchSnapshot $id $context
+        $hosts = @($context.host_adapters | Where-Object { (Convert-NetworkGuid $_.SwitchId) -eq $id } | ForEach-Object {
+            $adapter = $_; $net = Find-NetworkHostAdapter $adapter @($context.net_adapters)
+            if ($null -ne $net) {
+                [pscustomobject]@{ name = [string] $net.Name; interface_description = [string] $net.InterfaceDescription; mac_address = [string] $adapter.MacAddress; ip_addresses = @($context.addresses | Where-Object { $_.InterfaceIndex -eq $net.ifIndex -and $_.IPAddress } | ForEach-Object { '{0}/{1}' -f $_.IPAddress, $_.PrefixLength } | Sort-Object -Unique); status = [string] $net.Status }
+            }
+            else {
+                $warnings.Add("スイッチ「$($switch.Name)」のホスト側NICを一意に対応付けられないため、IPを表示できません。")
+                [pscustomobject]@{ name = [string] $adapter.Name; interface_description = ''; mac_address = [string] $adapter.MacAddress; ip_addresses = @(); status = 'Unknown' }
+            }
+        })
+        $vms = @($context.vm_adapters | Where-Object { (Convert-NetworkGuid $_.adapter.SwitchId) -eq $id } | ForEach-Object {
+            [pscustomobject]@{ vm_id = Convert-NetworkGuid $_.vm.Id; vm_name = [string] $_.vm.Name; vm_state = [string] $_.vm.State; adapter_name = [string] $_.adapter.Name; mac_address = [string] $_.adapter.MacAddress; ip_addresses = @($_.adapter.IPAddresses | Where-Object { ![string]::IsNullOrWhiteSpace([string] $_) } | ForEach-Object { [string] $_ } | Sort-Object -Unique) }
+        } | Sort-Object vm_name, adapter_name)
+        [pscustomobject]@{ id = $id; name = [string] $switch.Name; switch_type = [string] $switch.SwitchType; external_adapter_description = if ($switch.NetAdapterInterfaceDescription) { [string] $switch.NetAdapterInterfaceDescription } else { $null }; host_adapters = $hosts; vm_adapters = $vms; is_system_managed = $snapshot.view.is_system_managed; can_delete = $snapshot.view.can_delete; delete_reason = $snapshot.view.delete_reason; can_configure_host_ipv4 = $snapshot.view.can_configure_host_ipv4; host_ipv4_reason = $snapshot.view.host_ipv4_reason }
+    })
+    [pscustomobject]@{ switches = $views; warnings = @($warnings.ToArray()); physical_adapters = @(Get-PhysicalNetworkAdapterViews $context) }
+}
 function Convert-Vm([object] $vm) {
     [pscustomobject][ordered]@{
         id = $vm.Id.ToString()
@@ -1130,6 +1371,22 @@ try {
         }
         'network_inventory' {
             Write-Json (Get-NetworkInventory)
+            break
+        }
+        'get_network_switch_change_info' {
+            Write-Json (Get-NetworkSwitchSnapshot ([string] $payload.switch_id)).view
+            break
+        }
+        'create_network_switch' {
+            Write-Json (Invoke-CreateNetworkSwitch $payload)
+            break
+        }
+        'delete_network_switch' {
+            Write-Json (Invoke-DeleteNetworkSwitch $payload)
+            break
+        }
+        'save_host_network_ipv4' {
+            Write-Json (Save-HostNetworkIpv4 $payload)
             break
         }
         'get' {

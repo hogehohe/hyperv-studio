@@ -21,7 +21,8 @@ Tauri-aplikaĵo por Windows, kiu administras la virtualajn maŝinojn de Hyper-V 
 - Importo de ISO-diskbildoj en la datumdosierujon de la aplikaĵo kaj administrado laŭ operaciuma nomo kaj tipo per 「設定 → OSイメージ」 (agordoj → operaciumaj diskbildoj)
 - Klonado de haltigitaj VM-oj sub aliaj nomoj; por antaŭpreparita Linux, ankaŭ agordo de la komputilnomo ene de la operaciumo kaj de DHCP
 - Registrado de haltigitaj VM-oj kiel protektataj ŝablonoj en aparta listo; kreado de ordinaraj VM-oj el tiuj ŝablonoj
-- Nurlega retlisto kun ŝaltiltipoj, hostaj NIC-oj kaj iliaj IP-adresoj kun prefikslongoj, kaj VM-adresoj raportitaj de Hyper-V
+- Retlisto kun ŝaltiltipoj, hostaj NIC-oj kaj iliaj IP-adresoj kun prefikslongoj, kaj VM-adresoj raportitaj de Hyper-V
+- Krei kaj forigi virtualajn ŝaltilojn, kaj agordi fiksan hostan IPv4-adreson de propra Internal-ŝaltilo
 
 ### Defaŭltaj valoroj por novaj VM-oj
 
@@ -78,7 +79,7 @@ Por VM-oj de la 2-a generacio, Secure Boot estas ŝaltita, kaj la atestila ŝabl
 
 ### Retlisto de la gastiganto kaj VM-oj
 
-Malfermu 「ネットワーク」 (reto) en la flanka menuo por vidi la ekzistantajn virtualajn ŝaltilojn kaj iliajn konektojn. Ĉi tiu listo estas nurlega. Per 「再取得」 (relegi) vi povas akiri aktualan momentfoton; ĝi ne ŝanĝas ŝaltilojn, adresojn aŭ retagordojn.
+Malfermu 「ネットワーク」 (reto) en la flanka menuo por vidi la ekzistantajn virtualajn ŝaltilojn kaj iliajn konektojn. Per 「再取得」 (relegi) vi povas akiri aktualan momentfoton. La sama ekrano ankaŭ ebligas la jenajn administrajn operaciojn.
 
 | Ŝaltiltipo | Signifo |
 | --- | --- |
@@ -90,13 +91,23 @@ Por ĉiu ŝaltilo la listo montras la disponeblajn hostajn NIC-ojn, iliajn MAC-a
 
 La IP-adresoj de VM-oj estas valoroj raportitaj de Hyper-V. Ili povas manki aŭ esti malaktualaj, ekzemple kiam VM estas haltigita aŭ la integraj servoj ne liveras aktualajn datumojn. Mankanta valoro ne pruvas, ke la gastoperaciumo ne havas IP-adreson. La tipo Internal ne garantias izolon de eksteraj retoj: NAT aŭ vojigo povas ebligi eksteran konekton. Ĉi tiu listo ne determinas la agordojn de DHCP aŭ NAT kaj ne testas konekteblecon. Por ŝanĝi la NIC-ojn de unu VM, uzu 「ネットワーク」 en la detaloj de tiu VM, kiel priskribite sube.
 
+### Krei, forigi kaj agordi virtualajn ŝaltilojn
+
+Per 「＋ スイッチを作成」 (krei ŝaltilon), enigu nomon, elektu Internal, Private aŭ External kaj kontrolu la resumon antaŭ kreo. Por External elektu la fizikan adaptilon kaj konfirmu la efikon al la hosta konekto. La opcio kunhavigi la adaptilon kun la gastiga OS estas komence ŝaltita. Malŝalto forigas la hostan uzon de tiu adaptilo; eĉ kun kunhavigo, la konekto povas interrompiĝi dum kreo ([Microsoft](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/get-started/create-a-virtual-switch-for-hyper-v-virtual-machines)).
+
+Por forigi neuzatan ŝaltilon, premu ĝian 「削除」 (forigi), kontrolu la hostan adaptilon kaj ĝiajn IP-adresojn, kaj tajpu la ŝaltilnomon ekzakte. Se iu VM-NIC ankoraŭ estas konektita, ankaŭ ĉe haltigita aŭ ŝablona VM, forigo estas blokata. Unue malkonektu la NIC-ojn en la retagordoj de tiuj VM-oj. Default Switch kaj retoj administrataj de Windows/HNS estas protektataj; se la protektostato aŭ konektoj ne estas kontroleblaj, la operacio estas blokata.
+
+Por propra Internal-ŝaltilo, 「ホスト側IPv4」 (hosta IPv4) montras la aktualajn IPv4-adresojn kaj DHCP-staton. Enigu unu fiksan IPv4-adreson kaj prefikslongon 1–30, poste tajpu la ŝaltilnomon ekzakte. Konservado malŝaltas DHCP ĉe tiu hosta adaptilo kaj anstataŭigas ĝiajn ekzistantajn IPv4-adresojn per la enigita adreso. IPv6 kaj DNS ne estas redaktataj. Agordo estas blokata ĉe ekzistanta defaŭlta enirejo aŭ subreta interkovro kun alia hosta adaptilo. La aplikaĵo provas restarigi la antaŭajn IPv4- kaj DHCP-agordojn post malsukceso kaj raportas, se la restarigo malsukcesas.
+
+La VM-oj bezonas proprajn kongruajn IP-agordojn. Ĉi tiuj operacioj ne kreas DHCP-servilon, NAT aŭ defaŭltan enirejon kaj ne testas konekteblecon. Antaŭ forigo aŭ IP-ŝanĝo, la aplikaĵo rekontrolas la akiritan revizion; post ekstera ŝanĝo, relegu kaj konfirmu denove.
+
 ### Pluraj retadaptiloj
 
 En la retosekcio de nova VM, aldonu NIC-ojn kaj elektu por ĉiu ekzistantan virtualan ŝaltilon de la gastiganto. Unu VM povas havi ĝis 8 NIC-ojn, kaj ĉiu NIC povas esti konektita al malsama ŝaltilo. Eblas ankaŭ lasi NIC-ojn malkonektitaj aŭ krei agordon kun 0 NIC-oj.
 
 NIC-oj estas aldoneblaj ankaŭ al ekzistantaj VM-oj. Faru normalan malŝalton de la VM, atendu ĝis ĝi estas haltigita, elektu ĝin en la listo kaj malfermu 「ネットワーク」 (reto). Per 「＋NIC追加」 (aldoni NIC-on) aldonu vicojn, elektu virtualan ŝaltilon por ĉiu NIC kaj premu 「保存」 (konservi). Por funkcianta VM la retagordoj estas nur legeblaj; por konservi ŝanĝojn necesas haltigi ĝin.
 
-Ĉi tiu operacio ne kreas virtualajn ŝaltilojn, ne agordas NAT en la gastiganto kaj ne agordas vojigon aŭ izolon inter retoj. Antaŭe preparu la bezonatajn retojn en Hyper-V.
+La NIC-redaktilo ne kreas ŝaltilojn kaj ne agordas NAT, vojigon aŭ izolon inter retoj. Kreu la bezonatajn ŝaltilojn per 「ネットワーク」 en la flanka menuo aŭ per Hyper-V.
 
 ### Registri kaj protekti ŝablonan VM-on
 
@@ -234,7 +245,8 @@ Se agordo de la CPU aŭ ISO malsukcesas post kreado, la jam kreita VM ne estas a
 - 「設定 → OSイメージ」から ISO をアプリのデータ領域へ取り込み、OS 名と種類を付けて管理
 - 停止中の VM を別名で複製し、準備済みの Linux では OS 内部のホスト名と DHCP も設定
 - 停止中 VM を専用の一覧へテンプレート登録して保護し、テンプレートから通常 VM を作成
-- 仮想スイッチの種類、ホスト側 NIC の IP とプレフィックス長、Hyper-V が報告した VM 側 IP を読み取り専用で一覧表示
+- 仮想スイッチの種類、ホスト側 NIC の IP とプレフィックス長、Hyper-V が報告した VM 側 IP を一覧表示
+- 仮想スイッチの作成・削除と、独自の Internal スイッチのホスト側固定 IPv4 設定
 
 ### 新規 VM の既定値
 
@@ -291,7 +303,7 @@ VM の登録だけを削除する場合、Hyper-V は構成ファイルを削除
 
 ### ホストと VM のネットワーク一覧
 
-サイドバーの「ネットワーク」を開くと、既存の仮想スイッチと接続先を確認できます。この一覧は読み取り専用です。「再取得」で最新の状態を読み込みます。スイッチ、IP アドレス、ネットワーク設定の変更は行いません。
+サイドバーの「ネットワーク」を開くと、既存の仮想スイッチと接続先を確認できます。「再取得」で最新の状態を読み込みます。同じ画面から、以下の管理操作も行えます。
 
 | スイッチの種類 | 接続範囲 |
 | --- | --- |
@@ -303,13 +315,23 @@ VM の登録だけを削除する場合、Hyper-V は構成ファイルを削除
 
 VM 側 IP は Hyper-V が報告した値です。停止中や統合サービスの状態によって、未取得・古い値の場合があります。表示がなくても、ゲスト OS に IP アドレスが設定されていないとは限りません。Internal でも NAT やルーティングによって外部へ接続できる構成があります。この一覧では DHCP・NAT の設定や通信可否を判定しません。個別の VM の NIC を変更する場合は、以下のとおり VM 詳細の「ネットワーク」を使用します。
 
+### 仮想スイッチの作成・削除・ホスト側 IPv4 設定
+
+「＋ スイッチを作成」で名前と Internal / Private / External を指定し、確認画面から作成します。External では物理アダプターを選び、ホストの接続への影響を確認します。「ホストOSと物理アダプターを共有する」は初期状態でオンです。オフにするとホストからそのアダプターを利用できなくなります。共有する場合も作成中は通信が一時的に切れることがあります（[Microsoft の説明](https://learn.microsoft.com/en-us/windows-server/virtualization/hyper-v/get-started/create-a-virtual-switch-for-hyper-v-virtual-machines)）。
+
+未使用スイッチの「削除」を押し、ホスト側アダプターと IP アドレスを確認して、スイッチ名を完全一致で入力すると削除できます。停止中・テンプレートを含め、VM の NIC が 1 つでも接続中なら削除を防ぎます。先に各 VM のネットワーク設定で NIC を切断してください。Default Switch や Windows/HNS が管理するネットワークは保護します。保護状態や接続先を確認できない場合も操作を防ぎます。
+
+独自の Internal スイッチの「ホスト側IPv4」で、現在の IPv4 と DHCP 状態を確認し、固定 IPv4 を 1 つとプレフィックス長 1〜30 を入力します。スイッチ名を完全一致で入力して保存すると、そのホスト側アダプターの DHCP を無効にし、既存の IPv4 を入力したアドレスに置き換えます。IPv6 と DNS は編集しません。既存のデフォルトゲートウェイがある場合や、他のホスト NIC とサブネットが重なる場合は保存を防ぎます。途中で失敗した場合は元の IPv4・DHCP 設定の復元を試み、復元にも失敗した場合はエラーに明記します。
+
+VM 側には同じネットワークに合う IP 設定が必要です。DHCP サーバー・NAT・ゲートウェイの作成や通信確認は行いません。削除・IP 保存前には取得時の構成と再照合し、外部で変更されていた場合は再取得と再確認を求めます。
+
 ### 複数のネットワークアダプター
 
 新規 VM のネットワーク欄で NIC を追加し、それぞれの接続先をホスト上の既存の仮想スイッチから選びます。1 台の VM に最大 8 個の NIC を設定でき、NIC ごとに別のスイッチへ接続できます。NIC を接続しない構成や、NIC が 0 個の構成も選べます。
 
 既存 VM にも NIC を追加できます。VM をシャットダウンして停止し、一覧から選択して「ネットワーク」を開きます。「＋NIC追加」で行を増やし、各 NIC の仮想スイッチを選んで「保存」を押してください。稼働中の VM はネットワーク構成の閲覧のみで、変更を保存するには停止が必要です。
 
-仮想スイッチの作成、ホストの NAT 設定、ネットワーク間のルーティングや分離設定はこの操作では行いません。必要なネットワークは Hyper-V 側であらかじめ準備してください。
+NIC の編集ではスイッチ作成やホストの NAT・ルーティング・分離設定は行いません。必要なスイッチはサイドバーの「ネットワーク」または Hyper-V 側で作成してください。
 
 ### VM のテンプレート登録と保護
 
