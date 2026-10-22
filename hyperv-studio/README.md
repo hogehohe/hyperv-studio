@@ -20,6 +20,8 @@ Tauri-aplikaĵo por Windows, kiu administras la virtualajn maŝinojn de Hyper-V 
 - Elekto de hela, malhela aŭ laŭsistema aspekto per 「設定 → 外観」 (agordoj → aspekto), konservata ankaŭ por la sekva lanĉo
 - Importo de ISO-diskbildoj en la datumdosierujon de la aplikaĵo kaj administrado laŭ operaciuma nomo kaj tipo per 「設定 → OSイメージ」 (agordoj → operaciumaj diskbildoj)
 - Klonado de haltigitaj VM-oj sub aliaj nomoj; por antaŭpreparita Linux, ankaŭ agordo de la komputilnomo ene de la operaciumo kaj de DHCP
+- Registrado de haltigitaj VM-oj kiel protektataj ŝablonoj en aparta listo; kreado de ordinaraj VM-oj el tiuj ŝablonoj
+- Nurlega retlisto kun ŝaltiltipoj, hostaj NIC-oj kaj iliaj IP-adresoj kun prefikslongoj, kaj VM-adresoj raportitaj de Hyper-V
 
 ### Defaŭltaj valoroj por novaj VM-oj
 
@@ -74,6 +76,20 @@ La konservoloko estas `%LOCALAPPDATA%\jp.local.hypervstudio\iso-library`. La ISO
 
 Por VM-oj de la 2-a generacio, Secure Boot estas ŝaltita, kaj la atestila ŝablono estas elektita laŭ la operaciuma tipo (Linux: Microsoft UEFI Certificate Authority / Windows: Microsoft Windows). AlmaLinux 10 subtenas Secure Boot, do la aplikaĵo ne senkondiĉe malŝaltas ĝin ([oficiala klarigo de AlmaLinux](https://almalinux.org/blog/2025-05-27-welcoming-almalinux-10/)). Por ke la VM povu legi la ISO, la aplikaĵo donas al tiu VM legpermeson por la elektita ISO-dosiero.
 
+### Retlisto de la gastiganto kaj VM-oj
+
+Malfermu 「ネットワーク」 (reto) en la flanka menuo por vidi la ekzistantajn virtualajn ŝaltilojn kaj iliajn konektojn. Ĉi tiu listo estas nurlega. Per 「再取得」 (relegi) vi povas akiri aktualan momentfoton; ĝi ne ŝanĝas ŝaltilojn, adresojn aŭ retagordojn.
+
+| Ŝaltiltipo | Signifo |
+| --- | --- |
+| External | Konekto al fizika reto tra reta adaptilo de la gastiganto |
+| Internal | Reto inter la gastiganto kaj VM-oj konektitaj al la sama ŝaltilo |
+| Private | Reto inter VM-oj konektitaj al la sama ŝaltilo, sen hosta retadaptilo |
+
+Por ĉiu ŝaltilo la listo montras la disponeblajn hostajn NIC-ojn, iliajn MAC-adresojn kaj IP-adresojn kun prefikslongoj, kaj la konektitajn VM-NIC-ojn kun MAC- kaj IP-adresoj. Por External ankaŭ aperas la priskribo de la fizika adaptilo, se ĝi estas akirebla. Se parto de la informoj ne estas akirebla, la fenestro montras averton.
+
+La IP-adresoj de VM-oj estas valoroj raportitaj de Hyper-V. Ili povas manki aŭ esti malaktualaj, ekzemple kiam VM estas haltigita aŭ la integraj servoj ne liveras aktualajn datumojn. Mankanta valoro ne pruvas, ke la gastoperaciumo ne havas IP-adreson. La tipo Internal ne garantias izolon de eksteraj retoj: NAT aŭ vojigo povas ebligi eksteran konekton. Ĉi tiu listo ne determinas la agordojn de DHCP aŭ NAT kaj ne testas konekteblecon. Por ŝanĝi la NIC-ojn de unu VM, uzu 「ネットワーク」 en la detaloj de tiu VM, kiel priskribite sube.
+
 ### Pluraj retadaptiloj
 
 En la retosekcio de nova VM, aldonu NIC-ojn kaj elektu por ĉiu ekzistantan virtualan ŝaltilon de la gastiganto. Unu VM povas havi ĝis 8 NIC-ojn, kaj ĉiu NIC povas esti konektita al malsama ŝaltilo. Eblas ankaŭ lasi NIC-ojn malkonektitaj aŭ krei agordon kun 0 NIC-oj.
@@ -81,6 +97,28 @@ En la retosekcio de nova VM, aldonu NIC-ojn kaj elektu por ĉiu ekzistantan virt
 NIC-oj estas aldoneblaj ankaŭ al ekzistantaj VM-oj. Faru normalan malŝalton de la VM, atendu ĝis ĝi estas haltigita, elektu ĝin en la listo kaj malfermu 「ネットワーク」 (reto). Per 「＋NIC追加」 (aldoni NIC-on) aldonu vicojn, elektu virtualan ŝaltilon por ĉiu NIC kaj premu 「保存」 (konservi). Por funkcianta VM la retagordoj estas nur legeblaj; por konservi ŝanĝojn necesas haltigi ĝin.
 
 Ĉi tiu operacio ne kreas virtualajn ŝaltilojn, ne agordas NAT en la gastiganto kaj ne agordas vojigon aŭ izolon inter retoj. Antaŭe preparu la bezonatajn retojn en Hyper-V.
+
+### Registri kaj protekti ŝablonan VM-on
+
+Ŝablono estas ekzistanta VM markita en ĉi tiu aplikaĵo kiel bazo por klonado. La registrado ne kreas apartan kopion kaj ne movas la VM-dosierojn.
+
+1. Faru normalan malŝalton de la VM kaj atendu la staton 「停止」 (haltigita). Registrado ne eblas dum funkciado, en konservita stato aŭ dum paŭzo.
+2. Elektu la VM-on en 「仮想マシン」 (virtualaj maŝinoj) kaj premu 「テンプレートとして登録…」 (registri kiel ŝablonon) en ĝiaj detaloj.
+3. Enigu la montratan VM-nomon ekzakte, inkluzive de majuskloj kaj minuskloj, kaj premu 「登録して保護」 (registri kaj protekti).
+
+La VM aperas en la aparta sekcio 「テンプレート」 (ŝablonoj) anstataŭ la ordinara VM-listo. Dum ĝi estas registrita, la aplikaĵo blokas jenajn operaciojn:
+
+- Ekfunkciigo, malŝalto kaj malfermo de la konzolo per 「接続」
+- Renomado, ŝanĝoj de NIC-oj aŭ iliaj konektoj, kaj ŝanĝoj de Secure Boot aŭ la ekŝarga ordo
+- Forigo de la VM aŭ ĝiaj virtualaj diskoj
+
+Vidi la agordojn kaj kloni restas eble. Per 「テンプレートから作成」 (krei el ŝablono) vi malfermas la ordinaran klonadon; validas la samaj kondiĉoj priskribitaj sube. La nova VM ne estas aŭtomate registrita kiel ŝablono kaj estas administrebla kiel ordinara VM.
+
+Por ekfunkciigi aŭ redakti la originalon, elektu ĝin en 「テンプレート」 kaj premu 「テンプレート登録を解除…」 (malregistri ŝablonon). Enigu la montratan nomon ekzakte kaj premu 「登録と保護を解除」 (malregistri kaj malprotekti). La VM revenas al la ordinara listo; ĝiaj datumoj kaj virtualaj diskoj restas. Se Hyper-V ne plu trovas la VM-on, la ŝablonlisto montras tion kaj konservas la registron. Ankaŭ tiam vi povas forigi la restantan registron per 「テンプレート登録を解除」 kaj konfirmo de la montrata registrita nomo.
+
+**Registrado ne preparas la gastoperaciumon kaj ne rulas cloud-init.** Por aŭtomate ŝanĝi la Linux-komputilnomon kaj agordi DHCP dum klonado, aparte plenumu la preparon de la origina Linux-VM priskribitan sube.
+
+La ŝablonregistrado kaj protekto estas konservataj por ĉi tiu aplikaĵo kaj la nuna Windows-uzantokonto. Ili ne estas alirlimigoj de Hyper-V kaj ne malhelpas operaciojn per Hyper-V Manager, PowerShell, aliaj iloj aŭ alia uzantokonto. Se la aplikaĵo ne povas legi la registron, ĝi blokas VM-operaciojn ĝis la protektostato estas denove kontrolebla; uzu 「情報を更新」 (ĝisdatigi informojn) por reprovi.
 
 ### Kloni VM-on
 
@@ -195,6 +233,8 @@ Se agordo de la CPU aŭ ISO malsukcesas post kreado, la jam kreita VM ne estas a
 - 「設定 → 外観」からライト / ダーク / システムに合わせるを選択し、次回起動時にも保持
 - 「設定 → OSイメージ」から ISO をアプリのデータ領域へ取り込み、OS 名と種類を付けて管理
 - 停止中の VM を別名で複製し、準備済みの Linux では OS 内部のホスト名と DHCP も設定
+- 停止中 VM を専用の一覧へテンプレート登録して保護し、テンプレートから通常 VM を作成
+- 仮想スイッチの種類、ホスト側 NIC の IP とプレフィックス長、Hyper-V が報告した VM 側 IP を読み取り専用で一覧表示
 
 ### 新規 VM の既定値
 
@@ -249,6 +289,20 @@ VM の登録だけを削除する場合、Hyper-V は構成ファイルを削除
 
 第 2 世代 VM の Secure Boot は有効にし、選択した OS の種類に合わせて証明書を設定します（Linux: Microsoft UEFI Certificate Authority / Windows: Microsoft Windows）。AlmaLinux 10 は Secure Boot に対応しているため、一律に無効化はしません（[AlmaLinux の公式説明](https://almalinux.org/blog/2025-05-27-welcoming-almalinux-10/)）。VM が ISO を読み取れるよう、選択した ISO ファイルにその VM の読み取り権限を付けます。
 
+### ホストと VM のネットワーク一覧
+
+サイドバーの「ネットワーク」を開くと、既存の仮想スイッチと接続先を確認できます。この一覧は読み取り専用です。「再取得」で最新の状態を読み込みます。スイッチ、IP アドレス、ネットワーク設定の変更は行いません。
+
+| スイッチの種類 | 接続範囲 |
+| --- | --- |
+| External | ホストの物理アダプターを通じて物理ネットワークへ接続 |
+| Internal | 同じスイッチに接続した VM とホストの間 |
+| Private | 同じスイッチに接続した VM の間。ホスト側アダプターなし |
+
+スイッチごとに、取得できたホスト側 NIC の MAC アドレス、IP アドレスとプレフィックス長、接続中の VM の NIC とその MAC・IP アドレスを表示します。External では、取得できた場合に物理アダプターの説明も表示します。一部の情報を取得できなかった場合は、その旨を画面に表示します。
+
+VM 側 IP は Hyper-V が報告した値です。停止中や統合サービスの状態によって、未取得・古い値の場合があります。表示がなくても、ゲスト OS に IP アドレスが設定されていないとは限りません。Internal でも NAT やルーティングによって外部へ接続できる構成があります。この一覧では DHCP・NAT の設定や通信可否を判定しません。個別の VM の NIC を変更する場合は、以下のとおり VM 詳細の「ネットワーク」を使用します。
+
 ### 複数のネットワークアダプター
 
 新規 VM のネットワーク欄で NIC を追加し、それぞれの接続先をホスト上の既存の仮想スイッチから選びます。1 台の VM に最大 8 個の NIC を設定でき、NIC ごとに別のスイッチへ接続できます。NIC を接続しない構成や、NIC が 0 個の構成も選べます。
@@ -256,6 +310,28 @@ VM の登録だけを削除する場合、Hyper-V は構成ファイルを削除
 既存 VM にも NIC を追加できます。VM をシャットダウンして停止し、一覧から選択して「ネットワーク」を開きます。「＋NIC追加」で行を増やし、各 NIC の仮想スイッチを選んで「保存」を押してください。稼働中の VM はネットワーク構成の閲覧のみで、変更を保存するには停止が必要です。
 
 仮想スイッチの作成、ホストの NAT 設定、ネットワーク間のルーティングや分離設定はこの操作では行いません。必要なネットワークは Hyper-V 側であらかじめ準備してください。
+
+### VM のテンプレート登録と保護
+
+テンプレートは、既存の VM をこのアプリで複製のベースとして登録するものです。登録時に別のコピーを作成したり、VM のファイルを移動したりはしません。
+
+1. VM を通常のシャットダウンで停止し、状態が「停止」になるまで待ちます。実行中・保存状態・一時停止中は登録できません。
+2. 「仮想マシン」から対象を選び、詳細の「テンプレートとして登録…」を押します。
+3. 表示された VM 名を大文字・小文字も含めて完全一致で入力し、「登録して保護」を押します。
+
+登録後は、通常の VM 一覧から専用の「テンプレート」一覧へ移ります。登録中は、このアプリからの次の操作を防ぎます。
+
+- 起動・停止と「接続」からのコンソール起動
+- VM 名の変更、NIC の追加・削除・接続先変更、Secure Boot と起動順序の変更
+- VM と仮想ディスクの削除
+
+構成の閲覧と複製はできます。「テンプレートから作成」で通常の複製画面を開き、以下と同じ条件で複製します。複製先は自動でテンプレート登録されず、通常の VM として操作できます。
+
+元 VM を起動・変更するには、「テンプレート」で対象を選び、「テンプレート登録を解除…」を押します。表示された名前を完全一致で入力して「登録と保護を解除」を押すと、通常の一覧へ戻ります。VM のデータと仮想ディスクは残ります。Hyper-V から VM が見つからなくなった場合も、テンプレート一覧にその旨と登録情報を表示します。「テンプレート登録を解除」から、表示された登録名を完全一致で入力して残った登録情報を解除できます。
+
+**テンプレート登録だけでは、ゲスト OS の準備や cloud-init の実行は行いません。** Linux のホスト名・DHCP を複製時に自動設定する場合は、以下の origin 準備を別途実施してください。
+
+登録と保護は、このアプリと現在の Windows ユーザー単位で保存します。Hyper-V のアクセス制限ではないため、Hyper-V マネージャー、PowerShell、ほかのツールや別のユーザーからの操作は防げません。登録情報を読み込めない場合は、保護状態を確認できるまで VM 操作を無効にします。「情報を更新」から再取得してください。
 
 ### VM の複製
 

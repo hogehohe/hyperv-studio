@@ -10,12 +10,20 @@ Labortabla aplikaĵo por Windows, kiu ebligas krei kaj administri lokajn virtual
 
 - Listigi, krei, ŝalti kaj normale malŝalti virtualajn maŝinojn; malfermi iliajn konzolojn
 - Alinomi, forigi kaj kloni virtualajn maŝinojn kun sendependaj virtualaj diskoj
+- Registri haltigitajn VM-ojn kiel protektatajn ŝablonojn kaj krei ordinarajn VM-ojn el ili
 - Administri bibliotekon de ISO-bildoj kaj elekti operaciuman bildon dum kreado de nova maŝino
 - Agordi plurajn retadaptilojn, Secure Boot kaj la lanĉordon
+- Vidi virtualajn ŝaltilojn, hostajn retadaptilojn kaj la IP-adresojn raportitajn de Hyper-V en la retlisto
 - Agordi la komputilan nomon kaj DHCP dum klonado de preparitaj AlmaLinux / Rocky Linux / RHEL-maŝinoj
 - Elekti helan aŭ malhelan aspekton, aŭ sekvi la sisteman agordon
 
 La Windows-versio petas administrantajn rajtojn per UAC ĉe lanĉo. Hyper-V kaj ĝia PowerShell-modulo estas bezonataj.
+
+### Ŝablonoj kaj retlisto
+
+Por registri ŝablonon, elektu haltigitan VM-on kaj premu 「テンプレートとして登録…」; konfirmu per ĝia ekzakte tajpita nomo. Ĝi aperas en la aparta sekcio 「テンプレート」. Dum ĝi estas registrita, la aplikaĵo blokas ĝiajn ekfunkciigon, malŝalton, konzolan konekton, renomadon, forigon kaj ŝanĝojn de retaj aŭ ekŝargaj agordoj. Vidi la agordojn kaj kloni restas eble; la klono estas ordinara VM. Por redakti la originalon, unue malregistru ĝin, denove konfirmante la ekzaktan nomon. Tio ne forigas la VM-on aŭ ĝiajn diskojn. Registrado ne preparas la gastoperaciumon por cloud-init. La protekto estas loka al ĉi tiu aplikaĵo kaj Windows-uzantokonto; ĝi ne malhelpas ŝanĝojn per Hyper-V Manager, PowerShell aŭ aliaj iloj.
+
+La sekcio 「ネットワーク」 estas nurlega listo de ŝaltiloj External / Internal / Private, iliaj hostaj retadaptiloj kun IP-adreso kaj prefikslongo, kaj la konektitaj VM-NIC-oj. VM-adresoj estas valoroj raportitaj de Hyper-V kaj povas manki aŭ esti malaktualaj. Internal ne nepre signifas reton sen ekstera konekto: NAT aŭ vojigo povas ligi ĝin al aliaj retoj. La listo ne determinas DHCP- aŭ NAT-agordojn kaj ne testas konekteblecon. Detalaj instrukcioj kaj la proceduro por forigi restantan ŝablonregistron de ne plu ekzistanta VM troviĝas en [la README de la aplikaĵo](hyperv-studio/README.md#esperanto).
 
 ### Instalado
 
@@ -53,12 +61,20 @@ Pri uzado, defaŭltaj valoroj, preparado de Linuksa ŝablono kaj la kondiĉoj po
 
 - VM の一覧、作成、起動、シャットダウン、コンソール接続
 - 名前変更、削除、独立した仮想ディスクを持つ VM の複製
+- 停止中 VM のテンプレート登録・保護と、テンプレートから通常 VM を作成
 - ISO ライブラリと、OS イメージを選ぶ新規作成画面
 - 複数 NIC の設定、Secure Boot と起動順序の変更
+- 仮想スイッチ、ホスト側 NIC、Hyper-V が報告した IP アドレスをネットワーク一覧で表示
 - 準備済み AlmaLinux / Rocky Linux / RHEL の複製時にホスト名・DHCP を設定
 - ライト / ダーク / システムに合わせる外観設定
 
 Windows 版は起動時に UAC で管理者権限を要求します。Hyper-V と Hyper-V PowerShell モジュールが必要です。
+
+### テンプレートとネットワーク一覧
+
+停止中の VM で「テンプレートとして登録…」を選び、VM 名を完全一致で入力すると、専用の「テンプレート」一覧へ移ります。登録中は、このアプリからの起動・停止・接続・名前変更・削除・ネットワークや起動設定の変更を防ぎます。構成の閲覧と複製はでき、複製先は通常の VM になります。元 VM を変更する場合は、再度 VM 名を完全一致で入力して登録を解除します。解除しても VM とディスクは削除しません。登録だけではゲスト OS の cloud-init 準備は実行しません。保護はこのアプリと Windows ユーザー単位のもので、Hyper-V マネージャー、PowerShell、ほかのツールからの変更は防げません。
+
+「ネットワーク」は、External / Internal / Private の仮想スイッチ、ホスト側 NIC の IP アドレスとプレフィックス長、接続中の VM の NIC を確認する読み取り専用の一覧です。VM 側 IP は Hyper-V が報告した値で、未取得・古い値の場合があります。Internal でも NAT やルーティングにより外部へ接続できる構成があります。一覧では DHCP・NAT の設定や通信可否を判定しません。詳しい操作と、VM が見つからなくなった場合に残ったテンプレート登録を解除する手順は [アプリの README](hyperv-studio/README.md#日本語) を参照してください。
 
 ### インストール
 

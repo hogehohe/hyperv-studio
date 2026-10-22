@@ -160,6 +160,41 @@ pub struct HostStatus {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+pub struct HostNetworkAdapterInfo {
+    pub name: String,
+    pub interface_description: String,
+    pub mac_address: String,
+    pub ip_addresses: Vec<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SwitchVmAdapterInfo {
+    pub vm_id: String,
+    pub vm_name: String,
+    pub vm_state: String,
+    pub adapter_name: String,
+    pub mac_address: String,
+    pub ip_addresses: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SwitchInfo {
+    pub id: String,
+    pub name: String,
+    pub switch_type: String,
+    pub external_adapter_description: Option<String>,
+    pub host_adapters: Vec<HostNetworkAdapterInfo>,
+    pub vm_adapters: Vec<SwitchVmAdapterInfo>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct NetworkInventory {
+    pub switches: Vec<SwitchInfo>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct VmInfo {
     pub id: String,
     pub name: String,
@@ -315,6 +350,10 @@ pub fn host_status() -> Result<HostStatus, String> {
 
 pub fn list_vms() -> Result<Vec<VmInfo>, String> {
     run_action("list", json!({}))
+}
+
+pub fn network_inventory() -> Result<NetworkInventory, String> {
+    run_action("network_inventory", json!({}))
 }
 
 #[cfg(windows)]

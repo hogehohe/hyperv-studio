@@ -2,6 +2,7 @@ mod hyperv;
 mod iso_library;
 mod iso_picker;
 mod linux_seed;
+mod vm_templates;
 
 use hyperv::{
     CloneProgress, CloneVmRequest, CreateVmRequest, DeleteVmRequest, DeleteVmResult, HostStatus,
@@ -12,9 +13,28 @@ use iso_library::{ImportIsoRequest, IsoImage, IsoImportProgress, IsoLibrary};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
+use vm_templates::{NativeVm, Registry, TemplateInfo};
 
 #[derive(Default)]
 struct LibraryState(Arc<Mutex<()>>);
+
+fn template_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_local_data_dir()
+        .map_err(|error| error.to_string())
+}
+
+fn resolve_template_vm(id: &str) -> Result<Option<NativeVm>, String> {
+    let id = vm_templates::canonical_id(id)?;
+    Ok(hyperv::list_vms()?
+        .into_iter()
+        .find(|vm| vm.id.eq_ignore_ascii_case(&id))
+        .map(|vm| NativeVm {
+            id: vm.id,
+            name: vm.name,
+            state: vm.state,
+        }))
+}
 
 fn library_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -40,10 +60,74 @@ async fn get_host_status() -> Result<HostStatus, String> {
 }
 
 #[tauri::command]
+async fn get_network_inventory() -> Result<hyperv::NetworkInventory, String> {
+    tauri::async_runtime::spawn_blocking(hyperv::network_inventory)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 async fn list_vms() -> Result<Vec<VmInfo>, String> {
     tauri::async_runtime::spawn_blocking(hyperv::list_vms)
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn list_vm_templates(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+) -> Result<Vec<TemplateInfo>, String> {
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
+        Ok(Registry::open(&root)?.list())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn register_vm_template(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    id: String,
+    confirmation_name: String,
+) -> Result<Vec<TemplateInfo>, String> {
+    vm_templates::canonical_id(&id)?;
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
+        Registry::open(&root)?.register(&id, &confirmation_name, resolve_template_vm)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn unregister_vm_template(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    id: String,
+    confirmation_name: String,
+) -> Result<Vec<TemplateInfo>, String> {
+    vm_templates::canonical_id(&id)?;
+    let root = template_root(&app)?;
+    let gate = state.inner().0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate
+            .lock()
+            .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
+        Registry::open(&root)?.unregister(&id, &confirmation_name, resolve_template_vm)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -64,15 +148,19 @@ async fn get_vm_delete_info(
 
 #[tauri::command]
 async fn delete_vm(
+    app: tauri::AppHandle,
     state: tauri::State<'_, LibraryState>,
     request: DeleteVmRequest,
 ) -> Result<DeleteVmResult, String> {
+    vm_templates::canonical_id(&request.id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::delete_vm(request)
+        let id = request.id.clone();
+        vm_templates::with_unprotected(&root, &id, || hyperv::delete_vm(request))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -80,15 +168,19 @@ async fn delete_vm(
 
 #[tauri::command]
 async fn rename_vm(
+    app: tauri::AppHandle,
     state: tauri::State<'_, LibraryState>,
     request: RenameVmRequest,
 ) -> Result<VmInfo, String> {
+    vm_templates::canonical_id(&request.id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::rename_vm(request)
+        let id = request.id.clone();
+        vm_templates::with_unprotected(&root, &id, || hyperv::rename_vm(request))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -112,15 +204,19 @@ async fn get_vm_boot_settings(
 
 #[tauri::command]
 async fn save_vm_boot_settings(
+    app: tauri::AppHandle,
     state: tauri::State<'_, LibraryState>,
     request: SaveVmBootSettingsRequest,
 ) -> Result<VmBootSettings, String> {
+    vm_templates::canonical_id(&request.vm_id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::save_vm_boot_settings(request)
+        let id = request.vm_id.clone();
+        vm_templates::with_unprotected(&root, &id, || hyperv::save_vm_boot_settings(request))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -135,54 +231,76 @@ async fn list_vm_network_adapters(id: String) -> Result<Vec<VmNetworkAdapter>, S
 
 #[tauri::command]
 async fn save_vm_network_adapters(
+    app: tauri::AppHandle,
     state: tauri::State<'_, LibraryState>,
     request: SaveVmNetworkAdaptersRequest,
 ) -> Result<Vec<VmNetworkAdapter>, String> {
+    vm_templates::canonical_id(&request.vm_id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::save_vm_network_adapters(request)
+        let id = request.vm_id.clone();
+        vm_templates::with_unprotected(&root, &id, || hyperv::save_vm_network_adapters(request))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn start_vm(state: tauri::State<'_, LibraryState>, id: String) -> Result<VmInfo, String> {
+async fn start_vm(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    id: String,
+) -> Result<VmInfo, String> {
+    vm_templates::canonical_id(&id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::start_vm(&id)
+        vm_templates::with_unprotected(&root, &id, || hyperv::start_vm(&id))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn connect_vm(state: tauri::State<'_, LibraryState>, id: String) -> Result<(), String> {
+async fn connect_vm(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    id: String,
+) -> Result<(), String> {
+    vm_templates::canonical_id(&id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::connect_vm(&id)
+        vm_templates::with_unprotected(&root, &id, || hyperv::connect_vm(&id))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-async fn stop_vm(state: tauri::State<'_, LibraryState>, id: String) -> Result<VmInfo, String> {
+async fn stop_vm(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, LibraryState>,
+    id: String,
+) -> Result<VmInfo, String> {
+    vm_templates::canonical_id(&id)?;
+    let root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "VM操作のロックを取得できません。".to_string())?;
-        hyperv::stop_vm(&id)
+        vm_templates::with_unprotected(&root, &id, || hyperv::stop_vm(&id))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -195,11 +313,13 @@ async fn create_vm(
     mut request: CreateVmRequest,
 ) -> Result<VmInfo, String> {
     let root = library_root(&app)?;
+    let template_root = template_root(&app)?;
     let gate = state.inner().0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .lock()
             .map_err(|_| "ISOライブラリのロックを取得できません。".to_string())?;
+        let _registry = Registry::open(&template_root)?;
         if let Some(id) = request.iso_id.take() {
             if request.iso_path.is_some() {
                 return Err("OSとISOパスは同時に指定できません。".into());
@@ -221,6 +341,8 @@ async fn clone_vm(
     mut request: CloneVmRequest,
     on_progress: tauri::ipc::Channel<CloneProgress>,
 ) -> Result<VmInfo, String> {
+    vm_templates::canonical_id(&request.source_id)?;
+    let template_root = template_root(&app)?;
     let seed_root = app
         .path()
         .app_local_data_dir()
@@ -231,6 +353,9 @@ async fn clone_vm(
         let _guard = gate
             .lock()
             .map_err(|_| "VM複製のロックを取得できません。".to_string())?;
+        // Cloning a template is allowed. Keep registration stable for the whole
+        // copy, and fail closed if its protection metadata cannot be read.
+        let _registry = Registry::open(&template_root)?;
         let seed = if let Some(hostname) = request.guest_hostname.as_ref() {
             let adapters = hyperv::list_vm_network_adapters(&request.source_id)?;
             request.guest_adapter_ids = adapters.iter().map(|adapter| adapter.id.clone()).collect();
@@ -332,7 +457,11 @@ pub fn run() {
         .manage(LibraryState::default())
         .invoke_handler(tauri::generate_handler![
             get_host_status,
+            get_network_inventory,
             list_vms,
+            list_vm_templates,
+            register_vm_template,
+            unregister_vm_template,
             get_vm_delete_info,
             delete_vm,
             rename_vm,

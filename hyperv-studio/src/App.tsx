@@ -5,6 +5,7 @@ import { useIsoLibrary, formatIsoSize, type IsoImage } from "./useIsoLibrary";
 import IsoLibrarySettings, { osFamilyLabel } from "./IsoLibrarySettings";
 import NetworkAdaptersEditor, { newNetworkAdapter, networkAdapterDrafts, type NetworkAdapterDraft, type VmNetworkAdapter } from "./NetworkAdaptersEditor";
 import BootSettingsEditor, { type VmBootEntry, type VmBootSettings } from "./BootSettingsEditor";
+import NetworkInventory from "./NetworkInventory";
 import prepareLinuxTemplate from "../src-tauri/scripts/prepare-linux-template.sh?raw";
 import "./App.css";
 
@@ -30,6 +31,8 @@ type VmInfo = {
 
 type VmDeleteInfo = { id: string; name: string; state: string; disk_paths: string[]; can_delete_disks: boolean; disk_delete_reason: string | null; has_checkpoints: boolean };
 type VmDeleteResult = { id: string; deleted_disk_paths: string[]; retained_disk_paths: string[]; warning: string | null };
+type VmTemplate = { vm_id: string; registered_name: string; registered_at: number };
+type TemplateAction = { id: string; name: string; mode: "register" | "unregister"; missing?: boolean };
 
 type Draft = {
   name: string;
@@ -43,7 +46,7 @@ type Draft = {
 
 type CloneProgress = { phase: string; message: string };
 
-type IconName = "grid" | "server" | "plus" | "copy" | "edit" | "refresh" | "search" | "play" | "power" | "cpu" | "memory" | "disk" | "clock" | "network" | "chevron" | "close" | "check" | "alert" | "info" | "settings" | "sun" | "moon" | "monitor";
+type IconName = "grid" | "server" | "plus" | "copy" | "edit" | "refresh" | "search" | "play" | "power" | "cpu" | "memory" | "disk" | "clock" | "network" | "chevron" | "close" | "check" | "alert" | "info" | "settings" | "sun" | "moon" | "monitor" | "shield";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.65, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true as const };
@@ -52,6 +55,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     case "server": return <svg {...common}><rect x="3" y="3" width="18" height="7" rx="2" /><rect x="3" y="14" width="18" height="7" rx="2" /><path d="M7 6.5h.01M7 17.5h.01M11 6.5h7M11 17.5h7" /></svg>;
     case "plus": return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>;
     case "copy": return <svg {...common}><rect x="8" y="8" width="12" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" /></svg>;
+    case "shield": return <svg {...common}><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z" /><path d="m8.5 12 2.5 2.5 4.5-5" /></svg>;
     case "edit": return <svg {...common}><path d="m15 4 5 5M4 20l5-1L21 7a2.1 2.1 0 0 0-3-3L6 16l-2 4Z" /></svg>;
     case "refresh": return <svg {...common}><path d="M20 7v5h-5M4 17v-5h5" /><path d="M5.8 9A7 7 0 0 1 18 7l2 5M4 12l2 5a7 7 0 0 0 12.2-2" /></svg>;
     case "search": return <svg {...common}><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></svg>;
@@ -172,6 +176,14 @@ function App() {
   const [host, setHost] = useState<HostStatus | null>(null);
   const [hostError, setHostError] = useState<string | null>(null);
   const [vms, setVms] = useState<VmInfo[]>([]);
+  const [templates, setTemplates] = useState<VmTemplate[]>([]);
+  const [templatesKnown, setTemplatesKnown] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [vmSection, setVmSection] = useState<"vms" | "templates" | "network">("vms");
+  const [templateAction, setTemplateAction] = useState<TemplateAction | null>(null);
+  const [templateConfirmation, setTemplateConfirmation] = useState("");
+  const [templateActionError, setTemplateActionError] = useState<string | null>(null);
+  const [templateSaving, setTemplateSaving] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -233,7 +245,7 @@ function App() {
   const refreshCount = useRef(0);
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const modalOpen = settingsOpen || createOpen || shutdownVm !== null || cloneSource !== null || networkVm !== null || bootVm !== null || renameTarget !== null || deleteTarget !== null;
+  const modalOpen = settingsOpen || createOpen || shutdownVm !== null || cloneSource !== null || networkVm !== null || bootVm !== null || renameTarget !== null || deleteTarget !== null || templateAction !== null;
 
   async function refresh() {
     refreshCount.current += 1;
@@ -242,15 +254,18 @@ function App() {
     setHostError(null);
     setListError(null);
     try {
-      const [hostResult, vmResult] = await Promise.allSettled([
+      const [hostResult, vmResult, templateResult] = await Promise.allSettled([
         invoke<HostStatus>("get_host_status"),
         invoke<VmInfo[]>("list_vms"),
+        invoke<VmTemplate[]>("list_vm_templates"),
       ]);
       if (serial !== requestSerial.current) return;
       if (hostResult.status === "fulfilled") setHost(hostResult.value);
       else { setHost(null); setHostError(errorMessage(hostResult.reason)); }
       if (vmResult.status === "fulfilled") setVms(vmResult.value);
       else setListError(errorMessage(vmResult.reason));
+      if (templateResult.status === "fulfilled") { setTemplates(templateResult.value); setTemplatesKnown(true); setTemplatesError(null); }
+      else { setTemplatesKnown(false); setTemplatesError(errorMessage(templateResult.reason)); }
     } finally {
       refreshCount.current -= 1;
       if (refreshCount.current === 0) setLoading(false);
@@ -258,7 +273,7 @@ function App() {
   }
 
   function requestRefresh() {
-    if (operationLock.current || refreshCount.current > 0 || loading || creating || cloning || networkSaving || networkLoading || bootLoading || bootSaving || renaming || deleting || deleteInfoLoading || connectingId !== null || busyId !== null || modalOpen) return;
+    if (operationLock.current || refreshCount.current > 0 || loading || creating || cloning || networkSaving || networkLoading || bootLoading || bootSaving || renaming || deleting || templateSaving || deleteInfoLoading || connectingId !== null || busyId !== null || modalOpen) return;
     void refresh();
   }
 
@@ -272,7 +287,7 @@ function App() {
     const onDialogKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (operationLock.current || creating || cloning || networkSaving || bootSaving || renaming || deleting || busyId || isoLibrary.busy) return;
+        if (operationLock.current || creating || cloning || networkSaving || bootSaving || renaming || deleting || templateSaving || busyId || isoLibrary.busy) return;
         closeNetwork();
         closeBoot();
         setCreateOpen(false);
@@ -280,6 +295,7 @@ function App() {
         setShutdownVm(null);
         setSettingsOpen(false);
         setRenameTarget(null);
+        setTemplateAction(null);
         closeDelete();
       }
       if (event.key !== "Tab") return;
@@ -299,7 +315,7 @@ function App() {
     };
     document.addEventListener("keydown", onDialogKey);
     return () => document.removeEventListener("keydown", onDialogKey);
-  }, [modalOpen, creating, cloning, networkSaving, bootSaving, renaming, deleting, busyId, isoLibrary.busy]);
+  }, [modalOpen, creating, cloning, networkSaving, bootSaving, renaming, deleting, templateSaving, busyId, isoLibrary.busy]);
 
   useEffect(() => {
     if (!modalOpen && returnFocusRef.current?.isConnected) {
@@ -312,30 +328,90 @@ function App() {
     if (deleteTarget && deleteInfo && !deleteInfoLoading) deleteConfirmationRef.current?.focus();
   }, [deleteTarget?.id, deleteInfo, deleteInfoLoading]);
 
-  const filteredVms = useMemo(() => vms.filter((vm) => {
+  const templateMap = useMemo(() => new Map(templates.map((entry) => [entry.vm_id.toLowerCase(), entry])), [templates]);
+  const sectionVms = useMemo(() => templatesKnown ? vms.filter((vm) => templateMap.has(vm.id.toLowerCase()) === (vmSection === "templates")) : [], [vms, templatesKnown, templateMap, vmSection]);
+  const missingTemplates = useMemo(() => templatesKnown && !listError ? templates.filter((entry) => !vms.some((vm) => vm.id.toLowerCase() === entry.vm_id.toLowerCase())) : [], [templatesKnown, listError, templates, vms]);
+  const visibleMissingTemplates = vmSection === "templates" && filter === "all" ? missingTemplates.filter((entry) => entry.registered_name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())) : [];
+  const filteredVms = useMemo(() => sectionVms.filter((vm) => {
     const matchesText = vm.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase());
     const matchesState = filter === "all" || stateKind(vm.state) === filter;
     return matchesText && matchesState;
-  }).sort((a, b) => a.name.localeCompare(b.name, "ja")), [vms, search, filter]);
+  }).sort((a, b) => a.name.localeCompare(b.name, "ja")), [sectionVms, search, filter]);
 
   const selectedVm = filteredVms.find((vm) => vm.id === selectedId) ?? filteredVms[0] ?? null;
   const selectedIso = isoLibrary.library?.images.find((image) => image.id === draft.isoId) ?? null;
   const newVmDirectory = `${newVmBasePath}\\${draft.name.trim()}`;
   const newVmVhdPath = `${newVmDirectory}\\${draft.name.trim()}.vhdx`;
-  const runningCount = vms.filter((vm) => stateKind(vm.state) === "running").length;
-  const offCount = vms.filter((vm) => stateKind(vm.state) === "off").length;
-  const countsUnavailable = (loading || Boolean(listError)) && vms.length === 0;
-  const canManage = host?.can_manage === true;
-  const controlsBusy = loading || creating || cloning || networkLoading || networkSaving || bootLoading || bootSaving || renaming || deleting || deleteInfoLoading || connectingId !== null || busyId !== null || isoLibrary.busy;
+  const selectedIsTemplate = Boolean(selectedVm && templateMap.has(selectedVm.id.toLowerCase()));
+  const runningCount = sectionVms.filter((vm) => stateKind(vm.state) === "running").length;
+  const offCount = sectionVms.filter((vm) => stateKind(vm.state) === "off").length;
+  const sectionCount = sectionVms.length + (vmSection === "templates" ? missingTemplates.length : 0);
+  const countsUnavailable = !templatesKnown || Boolean(listError) || (loading && vms.length === 0);
+  const hostCanManage = host?.can_manage === true;
+  const canManage = hostCanManage && templatesKnown && !listError;
+  const controlsBusy = loading || creating || cloning || networkLoading || networkSaving || bootLoading || bootSaving || renaming || deleting || templateSaving || deleteInfoLoading || connectingId !== null || busyId !== null || isoLibrary.busy;
   const pageControlsBusy = controlsBusy || modalOpen;
   const bootChanged = Boolean(bootSettings && (bootSecureBoot !== bootSettings.secure_boot_enabled || bootEntries.length !== bootSettings.boot_entries.length || bootEntries.some((entry, index) => entry.id !== bootSettings.boot_entries[index]?.id)));
-  const bootCanEdit = bootSettings !== null && stateKind(bootSettings.state) === "off" && stateKind(vms.find((vm) => vm.id === bootSettings.vm_id)?.state || "") === "off";
+  const bootCanEdit = bootSettings !== null && !isProtectedVm(bootSettings.vm_id) && stateKind(bootSettings.state) === "off" && stateKind(vms.find((vm) => vm.id === bootSettings.vm_id)?.state || "") === "off";
   const bootCanSave = bootCanEdit && bootChanged && (bootSettings?.generation !== 2 || bootSecureBoot !== null);
+  const networkCanEdit = networkVm !== null && !isProtectedVm(networkVm.id) && stateKind(networkVm.state) === "off" && stateKind(vms.find((vm) => vm.id === networkVm.id)?.state || "") === "off";
   const deleteCurrentVm = deleteTarget ? vms.find((vm) => vm.id === deleteTarget.id) : null;
-  const deleteCanConfirm = Boolean(deleteTarget && deleteInfo && deleteConfirmation === deleteTarget.name && deleteCurrentVm && stateKind(deleteCurrentVm.state) === "off" && stateKind(deleteInfo.state) === "off" && (!deleteDisks || deleteInfo.can_delete_disks));
+  const deleteCanConfirm = Boolean(deleteTarget && !isProtectedVm(deleteTarget.id) && deleteInfo && deleteConfirmation === deleteTarget.name && deleteCurrentVm && stateKind(deleteCurrentVm.state) === "off" && stateKind(deleteInfo.state) === "off" && (!deleteDisks || deleteInfo.can_delete_disks));
+  const templateActionCurrentVm = templateAction ? vms.find((vm) => vm.id.toLowerCase() === templateAction.id.toLowerCase()) : null;
+  const templateCanConfirm = Boolean(templateAction && templatesKnown && templateConfirmation === templateAction.name && (templateAction.mode === "register" ? templateActionCurrentVm && stateKind(templateActionCurrentVm.state) === "off" && !isProtectedVm(templateAction.id) : templateMap.has(templateAction.id.toLowerCase())));
+
+  function isProtectedVm(id: string) { return !templatesKnown || templateMap.has(id.toLowerCase()); }
+
+  function selectSection(section: "vms" | "templates" | "network") {
+    if (operationLock.current || modalOpen) return;
+    setVmSection(section);
+    setSearch("");
+    setFilter("all");
+    setSelectedId(null);
+  }
+
+  function openTemplateAction(target: TemplateAction) {
+    if (!canManage || pageControlsBusy || operationLock.current || refreshCount.current > 0) return;
+    const current = vms.find((vm) => vm.id.toLowerCase() === target.id.toLowerCase());
+    if (target.mode === "register" && (!current || stateKind(current.state) !== "off" || isProtectedVm(target.id))) return;
+    if (target.mode === "unregister" && !templateMap.has(target.id.toLowerCase())) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setTemplateAction({ ...target, name: current?.name ?? target.name });
+    setTemplateConfirmation("");
+    setTemplateActionError(null);
+    setActionError(null);
+    setNotice(null);
+  }
+
+  async function saveTemplateAction() {
+    if (!templateAction || !canManage || controlsBusy || operationLock.current || refreshCount.current > 0 || templateConfirmation !== templateAction.name) return;
+    const target = templateAction;
+    const current = vms.find((vm) => vm.id.toLowerCase() === target.id.toLowerCase());
+    if (target.mode === "register" && (!current || stateKind(current.state) !== "off" || isProtectedVm(target.id))) return;
+    if (target.mode === "unregister" && !templateMap.has(target.id.toLowerCase())) return;
+    operationLock.current = true;
+    setTemplateSaving(true);
+    setTemplateActionError(null);
+    try {
+      const updated = await invoke<VmTemplate[]>(target.mode === "register" ? "register_vm_template" : "unregister_vm_template", { id: target.id, confirmationName: templateConfirmation });
+      setTemplates(updated);
+      setTemplatesKnown(true);
+      setTemplatesError(null);
+      setVmSection(target.mode === "register" ? "templates" : "vms");
+      setSearch("");
+      setFilter("all");
+      setSelectedId(target.id);
+      setTemplateAction(null);
+      setNotice(target.mode === "register" ? `「${target.name}」をテンプレートとして登録し、保護しました。` : `「${target.name}」のテンプレート登録を解除しました。VMとディスクは保持されます。`);
+      await refresh();
+    } catch (error) {
+      setTemplateActionError(errorMessage(error));
+      await refresh();
+    } finally { operationLock.current = false; setTemplateSaving(false); }
+  }
 
   function openSettings() {
-    if (creating || cloning || busyId || isoLibrary.busy || modalOpen || operationLock.current) return;
+    if (!templatesKnown || templateSaving || creating || cloning || busyId || isoLibrary.busy || modalOpen || operationLock.current) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSettingsOpen(true);
   }
@@ -352,7 +428,7 @@ function App() {
   }
 
   function openShutdown(vm: VmInfo) {
-    if (!canManage || pageControlsBusy || operationLock.current || refreshCount.current > 0) return;
+    if (!canManage || isProtectedVm(vm.id) || pageControlsBusy || operationLock.current || refreshCount.current > 0) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setShutdownVm(vm);
   }
@@ -412,7 +488,7 @@ function App() {
   }
 
   function openRename(vm: VmInfo) {
-    if (!canManage || pageControlsBusy || operationLock.current || refreshCount.current > 0) return;
+    if (!canManage || isProtectedVm(vm.id) || pageControlsBusy || operationLock.current || refreshCount.current > 0) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setRenameTarget(vm);
     setRenameName(vm.name);
@@ -422,7 +498,7 @@ function App() {
   }
 
   async function renameVm() {
-    if (!renameTarget || !canManage || controlsBusy || operationLock.current || refreshCount.current > 0 || renameName.trim() === renameTarget.name) return;
+    if (!renameTarget || !canManage || isProtectedVm(renameTarget.id) || controlsBusy || operationLock.current || refreshCount.current > 0 || renameName.trim() === renameTarget.name) return;
     const issue = validateName(renameName, vms.filter((vm) => vm.id !== renameTarget.id));
     setRenameError(issue);
     if (issue) return;
@@ -443,7 +519,7 @@ function App() {
   }
 
   function openDelete(vm: VmInfo) {
-    if (!canManage || pageControlsBusy || operationLock.current || refreshCount.current > 0 || stateKind(vm.state) !== "off") return;
+    if (!canManage || isProtectedVm(vm.id) || pageControlsBusy || operationLock.current || refreshCount.current > 0 || stateKind(vm.state) !== "off") return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setDeleteTarget(vm);
     setDeleteConfirmation("");
@@ -483,7 +559,7 @@ function App() {
   }
 
   async function deleteVm() {
-    if (!deleteTarget || !deleteInfo || !canManage || !deleteCanConfirm || controlsBusy || operationLock.current || refreshCount.current > 0) return;
+    if (!deleteTarget || !deleteInfo || !canManage || isProtectedVm(deleteTarget.id) || !deleteCanConfirm || controlsBusy || operationLock.current || refreshCount.current > 0) return;
     operationLock.current = true;
     setDeleting(true);
     setDeleteError(null);
@@ -509,7 +585,7 @@ function App() {
   }
 
   async function saveNetworkAdapters() {
-    if (!networkVm || !canManage || stateKind(networkVm.state) !== "off" || controlsBusy || !networkLoaded || operationLock.current || refreshCount.current > 0) return;
+    if (!networkVm || !canManage || isProtectedVm(networkVm.id) || stateKind(networkVm.state) !== "off" || controlsBusy || !networkLoaded || operationLock.current || refreshCount.current > 0) return;
     if (networkAdapters.length > 8) { setNetworkError("NICは8個以内にしてください。"); return; }
     operationLock.current = true;
     setNetworkSaving(true);
@@ -619,6 +695,7 @@ function App() {
       setSelectedId(vm.id);
       setSearch("");
       setFilter("all");
+      setVmSection("vms");
       setCreateOpen(false);
       setNotice(`「${vm.name}」を作成しました。`);
       void refresh();
@@ -655,6 +732,7 @@ function App() {
       setSelectedId(vm.id);
       setSearch("");
       setFilter("all");
+      setVmSection("vms");
       setCloneSource(null);
       setNotice(`「${vm.name}」を複製しました。停止した状態で作成されています。`);
       void refresh();
@@ -669,7 +747,7 @@ function App() {
   }
 
   async function connectVm(vm: VmInfo) {
-    if (!canManage || pageControlsBusy || operationLock.current || refreshCount.current > 0 || selectedVm?.id !== vm.id) return;
+    if (!canManage || isProtectedVm(vm.id) || pageControlsBusy || operationLock.current || refreshCount.current > 0 || selectedVm?.id !== vm.id) return;
     const target = vms.find((item) => item.id === vm.id);
     if (!target) return;
     const launchedAt = performance.now();
@@ -693,7 +771,7 @@ function App() {
   }
 
   async function runAction(vm: VmInfo, action: "start" | "stop") {
-    if (!canManage || controlsBusy || operationLock.current || refreshCount.current > 0 || createOpen || settingsOpen || cloneSource || networkVm || bootVm || renameTarget || deleteTarget) return;
+    if (!canManage || isProtectedVm(vm.id) || controlsBusy || operationLock.current || refreshCount.current > 0 || createOpen || settingsOpen || cloneSource || networkVm || bootVm || renameTarget || deleteTarget || templateAction) return;
     if (shutdownVm && (action !== "stop" || shutdownVm.id !== vm.id)) return;
     operationLock.current = true;
     setBusyId(vm.id);
@@ -723,8 +801,14 @@ function App() {
             <span className="brand-name">Hyper-V Studio</span>
           </div>
           <nav className="sidebar-nav">
-            <button className="sidebar-link active" aria-current="page" onClick={() => { setSearch(""); setFilter("all"); }}>
-              <Icon name="server" size={17} /><span>仮想マシン</span>
+            <button className={`sidebar-link ${vmSection === "vms" ? "active" : ""}`} aria-current={vmSection === "vms" ? "page" : undefined} disabled={pageControlsBusy} onClick={() => selectSection("vms")}>
+              <Icon name="server" size={17} /><span>仮想マシン</span><small className="sidebar-link-count">{countsUnavailable ? "—" : vms.length - templates.filter((entry) => vms.some((vm) => vm.id.toLowerCase() === entry.vm_id.toLowerCase())).length}</small>
+            </button>
+            <button className={`sidebar-link ${vmSection === "templates" ? "active" : ""}`} aria-current={vmSection === "templates" ? "page" : undefined} disabled={pageControlsBusy} onClick={() => selectSection("templates")}>
+              <Icon name="shield" size={17} /><span>テンプレート</span><small className="sidebar-link-count">{countsUnavailable ? "—" : templates.length}</small>
+            </button>
+            <button className={`sidebar-link ${vmSection === "network" ? "active" : ""}`} aria-current={vmSection === "network" ? "page" : undefined} disabled={pageControlsBusy} onClick={() => selectSection("network")}>
+              <Icon name="network" size={17} /><span>ネットワーク</span>
             </button>
           </nav>
           <div className="sidebar-section-label">ホスト</div>
@@ -736,13 +820,13 @@ function App() {
             </div>
           </div>
         </div>
-        <button className="sidebar-settings" type="button" onClick={openSettings} disabled={creating || cloning || networkSaving || networkLoading || bootLoading || bootSaving || renaming || deleting || deleteInfoLoading || connectingId !== null || busyId !== null || isoLibrary.busy}>
+        <button className="sidebar-settings" type="button" onClick={openSettings} disabled={!templatesKnown || templateSaving || creating || cloning || networkSaving || networkLoading || bootLoading || bootSaving || renaming || deleting || deleteInfoLoading || connectingId !== null || busyId !== null || isoLibrary.busy}>
           <Icon name="settings" size={17} /><span>設定</span>
         </button>
         <div className="sidebar-footer">
-          <span className={`connection-dot ${canManage ? "connected" : "disconnected"}`} />
+          <span className={`connection-dot ${hostCanManage ? "connected" : "disconnected"}`} />
           <div className="connection-copy">
-            <span>{loading ? "接続を確認中" : canManage ? "接続済み" : "接続を確認してください"}</span>
+            <span>{loading ? "接続を確認中" : hostCanManage ? "接続済み" : "接続を確認してください"}</span>
             <span className="connection-caption">Windows Hyper-V</span>
           </div>
           <span className="sidebar-footer-version">0.1</span>
@@ -750,10 +834,11 @@ function App() {
       </aside>
 
       <main className="main-content" inert={modalOpen}>
+        {vmSection === "network" ? <NetworkInventory disabled={controlsBusy} /> : <>
         <header className="topbar">
           <div className="topbar-heading">
-            <h1 id="vm-list-title">仮想マシン</h1>
-            <span className="heading-count">{countsUnavailable ? "—" : vms.length}</span>
+            <h1 id="vm-list-title">{vmSection === "templates" ? "テンプレート" : "仮想マシン"}</h1>
+            <span className="heading-count">{countsUnavailable ? "—" : sectionCount}</span>
           </div>
           <div className="topbar-actions">
             <button className="icon-button" type="button" onClick={requestRefresh} disabled={pageControlsBusy} aria-label="情報を更新" title="情報を更新">
@@ -765,7 +850,7 @@ function App() {
           </div>
         </header>
         <div className="workspace-body">
-          {(hostError || host?.error || (!canManage && !loading)) && (
+          {(hostError || host?.error || (!hostCanManage && !loading)) && (
             <div className="status-banner warning" role="alert">
               <span className="banner-icon"><Icon name="alert" size={16} /></span>
               <div>
@@ -781,6 +866,7 @@ function App() {
               <div><strong>一覧を取得できませんでした</strong><p>{listError}</p></div>
             </div>
           )}
+          {templatesError && <div className="status-banner warning" role="alert"><span className="banner-icon"><Icon name="shield" size={16} /></span><div><strong>テンプレートの保護状態を確認できません</strong><p>{templatesError}</p><small>安全のためVM操作を無効にしています。「情報を更新」から再取得してください。</small></div></div>}
           {actionError && !createOpen && !cloneSource && (
             <div className="status-banner warning" role="alert">
               <span className="banner-icon"><Icon name="alert" size={16} /></span>
@@ -804,36 +890,37 @@ function App() {
                   <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="名前で検索" aria-label="仮想マシン名で検索" />
                 </label>
                 <div className="filter-tabs" role="group" aria-label="状態で絞り込み">
-                  <button className={filter === "all" ? "selected" : ""} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>すべて<span className="filter-count">{countsUnavailable ? "—" : vms.length}</span></button>
+                  <button className={filter === "all" ? "selected" : ""} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>すべて<span className="filter-count">{countsUnavailable ? "—" : sectionCount}</span></button>
                   <button className={filter === "running" ? "selected" : ""} aria-pressed={filter === "running"} onClick={() => setFilter("running")}>実行中<span className="filter-count">{countsUnavailable ? "—" : runningCount}</span></button>
                   <button className={filter === "off" ? "selected" : ""} aria-pressed={filter === "off"} onClick={() => setFilter("off")}>停止中<span className="filter-count">{countsUnavailable ? "—" : offCount}</span></button>
                 </div>
               </div>
               <div className="vm-table-head" aria-hidden="true"><span>名前</span><span>状態</span><span>vCPU</span><span>メモリ</span></div>
               <div className="vm-list">
-                {loading && !vms.length ? (
+                {loading && (!vms.length || !templatesKnown) ? (
                   <div className="empty-state" role="status"><div className="loading-spinner" /><strong>読み込み中…</strong></div>
-                ) : filteredVms.length === 0 ? (
+                ) : !templatesKnown ? <div className="empty-state"><Icon name="shield" size={22} /><strong>保護状態を確認できていません</strong><p>情報を更新してテンプレート登録を再取得してください。</p></div> : filteredVms.length === 0 && visibleMissingTemplates.length === 0 ? (
                   <div className="empty-state">
-                    <Icon name={vms.length === 0 ? "server" : "search"} size={22} />
-                    <strong>{listError && vms.length === 0 ? "一覧を表示できません" : vms.length === 0 ? "仮想マシンはまだありません" : "一致する仮想マシンがありません"}</strong>
-                    <p>{listError && vms.length === 0 ? "接続を確認し、情報を更新してください。" : vms.length === 0 ? "新しいVMから仮想マシンを作成できます。" : "名前や状態の絞り込みを変更してください。"}</p>
-                    {vms.length === 0 && canManage && !listError && !pageControlsBusy && <button className="inline-create" onClick={openCreate}><Icon name="plus" size={14} />仮想マシンを作成</button>}
+                    <Icon name={sectionCount === 0 ? vmSection === "templates" ? "shield" : "server" : "search"} size={22} />
+                    <strong>{listError ? "一覧を表示できません" : sectionCount === 0 ? vmSection === "templates" ? "テンプレートはまだありません" : "仮想マシンはまだありません" : "一致する仮想マシンがありません"}</strong>
+                    <p>{listError ? "接続を確認し、情報を更新してください。" : sectionCount === 0 ? vmSection === "templates" ? "停止中のVMの詳細からテンプレートとして登録できます。" : "新しいVMから仮想マシンを作成できます。" : "名前や状態の絞り込みを変更してください。"}</p>
+                    {sectionCount === 0 && vmSection === "vms" && canManage && !pageControlsBusy && <button className="inline-create" onClick={openCreate}><Icon name="plus" size={14} />仮想マシンを作成</button>}
                   </div>
                 ) : filteredVms.map((vm) => (
                   <button key={vm.id} className={`vm-row ${selectedVm?.id === vm.id ? "selected" : ""}`} aria-pressed={selectedVm?.id === vm.id} onClick={() => setSelectedId(vm.id)}>
                     <span className="vm-row-identity">
-                      <span className="vm-row-icon"><Icon name="server" size={18} /></span>
-                      <span className="vm-row-main"><strong>{vm.name}</strong><small>第 {vm.generation} 世代</small></span>
+                      <span className="vm-row-icon"><Icon name={vmSection === "templates" ? "shield" : "server"} size={18} /></span>
+                      <span className="vm-row-main"><strong>{vm.name}</strong><small>第 {vm.generation} 世代{vmSection === "templates" ? " · 保護中" : ""}</small></span>
                     </span>
                     <span className="vm-row-state"><span className={`vm-state ${stateKind(vm.state)}`}><span />{stateLabel(vm.state)}</span></span>
                     <span className="vm-row-cpu">{vm.processor_count}</span>
                     <span className="vm-row-memory">{formatMemory(vm.memory_startup_bytes)}</span>
                   </button>
                 ))}
+                {visibleMissingTemplates.map((entry) => <div key={entry.vm_id} className="missing-template-row"><span className="vm-row-icon"><Icon name="shield" size={18} /></span><div><strong>{entry.registered_name}</strong><p>Hyper-VにVMが見つかりません。登録情報は保持されています。</p><code>{entry.vm_id}</code><button className="text-button" type="button" disabled={!canManage || pageControlsBusy} onClick={() => openTemplateAction({ id: entry.vm_id, name: entry.registered_name, mode: "unregister", missing: true })}>テンプレート登録を解除</button></div></div>)}
               </div>
               <div className="list-footer">
-                <span>{countsUnavailable ? "一覧を取得できていません" : `${filteredVms.length === vms.length ? vms.length : `${filteredVms.length} / ${vms.length}`} 台`}</span>
+                <span>{countsUnavailable ? "一覧を取得できていません" : `${filteredVms.length + visibleMissingTemplates.length === sectionCount ? sectionCount : `${filteredVms.length + visibleMissingTemplates.length} / ${sectionCount}`} 台`}</span>
                 <span>{loading ? "更新中…" : canManage ? host?.computer_name : "未接続"}</span>
               </div>
             </section>
@@ -843,11 +930,12 @@ function App() {
               {selectedVm ? (
                 <div className="detail-content">
                   <div className="detail-identity">
-                    <div className="detail-name-row"><h2>{selectedVm.name}</h2><button className="detail-rename-button" type="button" title="名前を変更" aria-label="名前を変更" disabled={!canManage || pageControlsBusy} onClick={() => openRename(selectedVm)}><Icon name="edit" size={14} /></button></div>
-                    <p className="detail-subtitle">第 {selectedVm.generation} 世代の仮想マシン</p>
+                    <div className="detail-name-row"><h2>{selectedVm.name}</h2>{!selectedIsTemplate && <button className="detail-rename-button" type="button" title="名前を変更" aria-label="名前を変更" disabled={!canManage || pageControlsBusy} onClick={() => openRename(selectedVm)}><Icon name="edit" size={14} /></button>}</div>
+                    <p className="detail-subtitle">第 {selectedVm.generation} 世代の{selectedIsTemplate ? "テンプレート" : "仮想マシン"}</p>
                   </div>
+                  {selectedIsTemplate && <div className="template-protection"><span className="template-protection-badge"><Icon name="shield" size={13} />保護中</span><p>複製のベースとして登録されています。このアプリでの起動・停止・接続・構成変更・削除を保護します。</p></div>}
                   <span className={`vm-state ${stateKind(selectedVm.state)}`}><span />{stateLabel(selectedVm.state)}</span>
-                  <div className="detail-actions">
+                  {!selectedIsTemplate && <div className="detail-actions">
                     {stateKind(selectedVm.state) === "running" ? (
                       <><button className="shutdown-button" disabled={!canManage || pageControlsBusy} onClick={() => openShutdown(selectedVm)}><Icon name="power" size={15} />{busyId === selectedVm.id ? "処理中…" : "シャットダウン"}</button><p>ゲストOSへ通常のシャットダウンを要求します。</p></>
                     ) : (stateKind(selectedVm.state) === "off" || selectedVm.state.toLowerCase() === "saved") ? (
@@ -855,10 +943,10 @@ function App() {
                     ) : (
                       <p className="detail-hint">この状態では起動・停止できません。</p>
                     )}
-                  </div>
-                  <div className="detail-connect-action"><button className="secondary-button" type="button" title="VMConnectで接続画面を開く" disabled={!canManage || pageControlsBusy} onClick={() => void connectVm(selectedVm)}><Icon name="monitor" size={15} />{connectingId === selectedVm.id ? "開いています…" : "接続"}</button></div>
+                  </div>}
+                  {!selectedIsTemplate && <div className="detail-connect-action"><button className="secondary-button" type="button" title="VMConnectで接続画面を開く" disabled={!canManage || pageControlsBusy} onClick={() => void connectVm(selectedVm)}><Icon name="monitor" size={15} />{connectingId === selectedVm.id ? "開いています…" : "接続"}</button></div>}
                   <div className="detail-clone-action">
-                    <button className="secondary-button" type="button" disabled={!canManage || pageControlsBusy || stateKind(selectedVm.state) !== "off"} onClick={() => openClone(selectedVm)}><Icon name="copy" size={15} />複製</button>
+                    <button className={selectedIsTemplate ? "primary-button" : "secondary-button"} type="button" disabled={!canManage || pageControlsBusy || stateKind(selectedVm.state) !== "off"} onClick={() => openClone(selectedVm)}><Icon name="copy" size={15} />{selectedIsTemplate ? "テンプレートから作成" : "複製"}</button>
                     {stateKind(selectedVm.state) !== "off" && <p>複製するには、元のVMを停止してください。</p>}
                   </div>
                   <div className="detail-network-action"><button className="secondary-button" type="button" disabled={!canManage || pageControlsBusy} onClick={() => openNetwork(selectedVm)}><Icon name="network" size={15} />ネットワーク</button></div>
@@ -876,7 +964,11 @@ function App() {
                     <h3>仮想マシンID</h3>
                     <div className="detail-id"><code>{selectedVm.id}</code></div>
                   </section>
-                  <section className="detail-section detail-delete-section"><button className="text-button detail-delete-button" type="button" disabled={!canManage || pageControlsBusy || stateKind(selectedVm.state) !== "off"} onClick={() => openDelete(selectedVm)}>VMを削除</button>{stateKind(selectedVm.state) !== "off" && <p>削除するにはVMを停止してください。</p>}</section>
+                  <section className="detail-section detail-template-section">
+                    <button className="text-button" type="button" disabled={!canManage || pageControlsBusy || (!selectedIsTemplate && stateKind(selectedVm.state) !== "off")} onClick={() => openTemplateAction({ id: selectedVm.id, name: selectedVm.name, mode: selectedIsTemplate ? "unregister" : "register" })}>{selectedIsTemplate ? "テンプレート登録を解除…" : "テンプレートとして登録…"}</button>
+                    <p>{selectedIsTemplate ? "編集するには、確認画面から登録と保護を解除してください。" : stateKind(selectedVm.state) === "off" ? "複製のベースとして分け、変更から保護します。" : "登録するにはVMを停止してください。"}</p>
+                  </section>
+                  {!selectedIsTemplate && <section className="detail-section detail-delete-section"><button className="text-button detail-delete-button" type="button" disabled={!canManage || pageControlsBusy || stateKind(selectedVm.state) !== "off"} onClick={() => openDelete(selectedVm)}>VMを削除</button>{stateKind(selectedVm.state) !== "off" && <p>削除するにはVMを停止してください。</p>}</section>}
                 </div>
               ) : (
                 <div className="detail-empty"><Icon name="server" size={22} /><strong>仮想マシンの詳細</strong><p>一覧から仮想マシンを選択してください。</p></div>
@@ -884,6 +976,7 @@ function App() {
             </aside>
           </div>
         </div>
+        </>}
       </main>
 
       {settingsOpen && (
@@ -987,6 +1080,23 @@ function App() {
         </div>
       )}
 
+      {templateAction && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !templateSaving) setTemplateAction(null); }}>
+          <div ref={dialogRef} className="modal template-modal" role="dialog" aria-modal="true" aria-labelledby="template-action-title" aria-describedby="template-action-description" aria-busy={templateSaving}>
+            <div className="modal-header"><div><h2 id="template-action-title">{templateAction.mode === "register" ? "テンプレートとして登録" : "テンプレート登録を解除"}</h2><p>{templateAction.name}</p></div><button className="icon-button" type="button" disabled={templateSaving} aria-label="テンプレートの確認を閉じる" onClick={() => setTemplateAction(null)}><Icon name="close" size={17} /></button></div>
+            <form onSubmit={(event) => { event.preventDefault(); void saveTemplateAction(); }}>
+              <div className="modal-body">
+                {templateAction.mode === "register" ? <><p id="template-action-description" className="template-action-description">このVMを複製のベースとして登録し、テンプレートの一覧へ移動します。</p><div className="template-protection-scope"><strong><Icon name="shield" size={15} />登録中はこのアプリで次の操作を保護します</strong><ul><li>起動・停止・接続</li><li>VM名・ネットワーク・起動設定の変更</li><li>VMと仮想ディスクの削除</li></ul><p>構成の閲覧と複製はできます。変更する場合は、先に登録を解除してください。</p></div><p className="template-scope-note">Hyper-Vマネージャーや他のツールからの操作は制限しません。登録だけではOS内部のテンプレート準備は実行しません。</p></> : <><p id="template-action-description" className="template-action-description">テンプレート登録と、このアプリでの保護を解除します。VMと仮想ディスクは削除しません。</p><p className="template-scope-note">{templateAction.missing ? "Hyper-VにVMが見つからないため、残っているテンプレート登録情報を解除します。" : "通常の仮想マシンの一覧に戻り、起動や構成変更ができるようになります。"}</p></>}
+                <div className="form-field"><label htmlFor="template-confirmation">確認のためVM名を入力 <span className="required">必須</span></label><input id="template-confirmation" autoFocus autoComplete="off" spellCheck={false} disabled={templateSaving} value={templateConfirmation} onChange={(event) => setTemplateConfirmation(event.target.value)} aria-describedby="template-confirmation-help" /><small id="template-confirmation-help">「{templateAction.name}」と大文字・小文字を含めて完全一致するように入力してください。</small></div>
+                {templateActionError && <div className="form-errors" role="alert"><Icon name="alert" size={15} /><span>{templateActionError}</span></div>}
+                {templateSaving && <p className="template-action-progress" role="status">{templateAction.mode === "register" ? "テンプレートを登録しています…" : "テンプレート登録を解除しています…"}</p>}
+              </div>
+              <div className="modal-footer"><button className="secondary-button" type="button" disabled={templateSaving} onClick={() => setTemplateAction(null)}>キャンセル</button><button className="primary-button" type="submit" disabled={!canManage || controlsBusy || !templateCanConfirm}>{templateSaving ? "処理中…" : templateAction.mode === "register" ? "登録して保護" : "登録と保護を解除"}</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {deleteTarget && (
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !deleting) closeDelete(); }}>
           <div ref={dialogRef} className="modal delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-scope" aria-busy={deleting || deleteInfoLoading}>
@@ -1024,7 +1134,7 @@ function App() {
                 {renameError && <div id="rename-error" className="form-errors" role="alert"><Icon name="alert" size={15} /><span>{renameError}</span></div>}
                 {renaming && <p className="rename-saving" role="status">名前を変更しています…</p>}
               </div>
-              <div className="modal-footer"><button className="secondary-button" type="button" disabled={renaming} onClick={() => setRenameTarget(null)}>キャンセル</button><button className="primary-button" type="submit" disabled={controlsBusy || renameName.trim() === renameTarget.name}>{renaming ? "保存中…" : "保存"}</button></div>
+              <div className="modal-footer"><button className="secondary-button" type="button" disabled={renaming} onClick={() => setRenameTarget(null)}>キャンセル</button><button className="primary-button" type="submit" disabled={!canManage || isProtectedVm(renameTarget.id) || controlsBusy || renameName.trim() === renameTarget.name}>{renaming ? "保存中…" : "保存"}</button></div>
             </form>
           </div>
         </div>
@@ -1037,12 +1147,12 @@ function App() {
             <div className="modal-body">
               {bootError && <div className="form-errors" role="alert"><Icon name="alert" size={15} /><span>{bootError}</span></div>}
               {bootLoading ? <div className="network-loading" role="status"><div className="loading-spinner" /><span>起動設定を読み込んでいます…</span></div> : bootSettings && <>
-                <p className="boot-edit-hint">{bootCanEdit ? "変更は「保存」で反映します。" : "現在は閲覧のみです。変更するにはVMを停止してください。"}</p>
+                <p className="boot-edit-hint">{!templatesKnown ? "保護状態を確認できないため閲覧のみです。一度閉じて、情報を更新してください。" : isProtectedVm(bootVm.id) ? "テンプレートは保護中のため閲覧のみです。変更するには登録を解除してください。" : bootCanEdit ? "変更は「保存」で反映します。" : "現在は閲覧のみです。変更するにはVMを停止してください。"}</p>
                 <BootSettingsEditor settings={bootSettings} entries={bootEntries} secureBootEnabled={bootSecureBoot} onEntriesChange={setBootEntries} onSecureBootChange={setBootSecureBoot} disabled={bootSaving || !canManage} readOnly={!bootCanEdit} />
               </>}
               {bootSaving && <p className="boot-saving" role="status">起動設定を保存しています…</p>}
             </div>
-            <div className="modal-footer boot-modal-footer"><button className="text-button" type="button" disabled={bootLoading || bootSaving} title="未保存の変更を破棄して再取得" onClick={() => void loadBootSettings(bootVm)}><Icon name="refresh" size={14} />再取得</button><div className="boot-footer-actions">{stateKind(bootVm.state) === "off" ? <><button className="secondary-button" type="button" disabled={bootSaving} onClick={closeBoot}>キャンセル</button><button className="primary-button" type="button" disabled={!canManage || controlsBusy || !bootCanSave} onClick={() => void saveBootSettings()}>{bootSaving ? "保存中…" : "保存"}</button></> : <button className="primary-button" type="button" disabled={bootSaving} onClick={closeBoot}>閉じる</button>}</div></div>
+            <div className="modal-footer boot-modal-footer"><button className="text-button" type="button" disabled={bootLoading || bootSaving} title="未保存の変更を破棄して再取得" onClick={() => void loadBootSettings(bootVm)}><Icon name="refresh" size={14} />再取得</button><div className="boot-footer-actions">{bootCanEdit ? <><button className="secondary-button" type="button" disabled={bootSaving} onClick={closeBoot}>キャンセル</button><button className="primary-button" type="button" disabled={!canManage || controlsBusy || !bootCanSave} onClick={() => void saveBootSettings()}>{bootSaving ? "保存中…" : "保存"}</button></> : <button className="primary-button" type="button" disabled={bootSaving} onClick={closeBoot}>閉じる</button>}</div></div>
           </div>
         </div>
       )}
@@ -1054,13 +1164,13 @@ function App() {
             <div className="modal-body">
               {networkError && <><div className="form-errors" role="alert"><Icon name="alert" size={15} /><span>{networkError}</span></div>{networkLoaded && <button className="text-button network-reload" type="button" disabled={networkLoading || networkSaving} onClick={() => void loadNetworkAdapters(networkVm)}>構成を再取得（編集を破棄）</button>}</>}
               {networkLoading ? <div className="network-loading" role="status"><div className="loading-spinner" /><span>NICの構成を読み込んでいます…</span></div> : networkLoaded ? <>
-                <p className="network-edit-hint">{stateKind(networkVm.state) === "off" ? "NICの追加・削除・接続先の変更は「保存」で反映します。" : "現在は閲覧のみです。変更するにはVMを停止してください。"}</p>
-                <NetworkAdaptersEditor adapters={networkAdapters} switches={host?.switches ?? []} onChange={setNetworkAdapters} disabled={networkSaving || !canManage} readOnly={stateKind(networkVm.state) !== "off"} />
+                <p className="network-edit-hint">{!templatesKnown ? "保護状態を確認できないため閲覧のみです。一度閉じて、情報を更新してください。" : isProtectedVm(networkVm.id) ? "テンプレートは保護中のため閲覧のみです。変更するには登録を解除してください。" : networkCanEdit ? "NICの追加・削除・接続先の変更は「保存」で反映します。" : "現在は閲覧のみです。変更するにはVMを停止してください。"}</p>
+                <NetworkAdaptersEditor adapters={networkAdapters} switches={host?.switches ?? []} onChange={setNetworkAdapters} disabled={networkSaving || !canManage} readOnly={!networkCanEdit} />
                 <p className="network-guest-hint">追加したNICはゲストOS内でも設定が必要です。複製時のDHCP自動設定は、複製した時点のNICが対象です。</p>
               </> : <button className="secondary-button" type="button" disabled={networkSaving} onClick={() => void loadNetworkAdapters(networkVm)}>再取得</button>}
               {networkSaving && <p className="network-saving" role="status">ネットワークを保存しています…</p>}
             </div>
-            <div className="modal-footer">{stateKind(networkVm.state) === "off" ? <><button className="secondary-button" type="button" disabled={networkSaving} onClick={closeNetwork}>キャンセル</button><button className="primary-button" type="button" disabled={!canManage || !networkLoaded || controlsBusy} onClick={() => void saveNetworkAdapters()}>{networkSaving ? "保存中…" : "保存"}</button></> : <button className="primary-button" type="button" onClick={closeNetwork}>閉じる</button>}</div>
+            <div className="modal-footer">{networkCanEdit ? <><button className="secondary-button" type="button" disabled={networkSaving} onClick={closeNetwork}>キャンセル</button><button className="primary-button" type="button" disabled={!canManage || !networkLoaded || controlsBusy} onClick={() => void saveNetworkAdapters()}>{networkSaving ? "保存中…" : "保存"}</button></> : <button className="primary-button" type="button" onClick={closeNetwork}>閉じる</button>}</div>
           </div>
         </div>
       )}
@@ -1069,7 +1179,7 @@ function App() {
         <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !cloning) setCloneSource(null); }}>
           <div ref={dialogRef} className="modal clone-modal" role="dialog" aria-modal="true" aria-labelledby="clone-title" aria-describedby="clone-description" aria-busy={cloning}>
             <div className="modal-header">
-              <div><h2 id="clone-title">仮想マシンを複製</h2><p id="clone-description">停止中・チェックポイントなしのVMに対応します。</p></div>
+              <div><h2 id="clone-title">{templateMap.has(cloneSource.id.toLowerCase()) ? "テンプレートから作成" : "仮想マシンを複製"}</h2><p id="clone-description">停止中・チェックポイントなしのVMに対応します。</p></div>
               <button className="icon-button" type="button" aria-label="複製を閉じる" disabled={cloning} onClick={() => setCloneSource(null)}><Icon name="close" size={17} /></button>
             </div>
             {cloning && <div className="clone-progress" role="status" aria-live="polite" aria-atomic="true"><div className="loading-spinner" aria-hidden="true" /><div><strong>複製しています</strong><p>{cloneProgress?.message || "複製の準備をしています。"}</p><small>完了するまでアプリを開いたままお待ちください。</small></div></div>}

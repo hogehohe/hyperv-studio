@@ -972,6 +972,114 @@ function Invoke-DeleteVm([object] $request) {
     [pscustomobject][ordered]@{ id = $vmId.ToString(); deleted_disk_paths = @($deleted.ToArray()); retained_disk_paths = @($retained.ToArray()); warning = if ($warnings.Count -gt 0) { $warnings -join ' ' } else { $null } }
 }
 
+function Get-NetworkInventory {
+    $switches = @(Get-VMSwitch -ErrorAction Stop | Sort-Object Name)
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+    $switchViews = New-Object 'System.Collections.Generic.List[object]'
+    $bySwitch = @{}
+    foreach ($switch in $switches) {
+        $id = $switch.Id.ToString().ToLowerInvariant()
+        $item = [pscustomobject]@{
+            id = $id
+            name = [string] $switch.Name
+            switch_type = $switch.SwitchType.ToString()
+            external_adapter_description = $(if ($switch.NetAdapterInterfaceDescription) { [string] $switch.NetAdapterInterfaceDescription } else { $null })
+            host_adapters = New-Object 'System.Collections.Generic.List[object]'
+            vm_adapters = New-Object 'System.Collections.Generic.List[object]'
+        }
+        $switchViews.Add($item)
+        $bySwitch[$id] = $item
+    }
+
+    $vms = @()
+    try { $vms = @(Get-VM -ErrorAction Stop) }
+    catch { $warnings.Add("VMの一覧を取得できません: $($_.Exception.Message)") }
+    foreach ($vm in $vms) {
+        try {
+            foreach ($adapter in @(Get-VMNetworkAdapter -VM $vm -ErrorAction Stop)) {
+                $switchId = ([string] $adapter.SwitchId).ToLowerInvariant()
+                if (!$bySwitch.ContainsKey($switchId)) { continue }
+                $addresses = @($adapter.IPAddresses | Where-Object { ![string]::IsNullOrWhiteSpace([string] $_) } | ForEach-Object { [string] $_ } | Sort-Object -Unique)
+                $bySwitch[$switchId].vm_adapters.Add([pscustomobject]@{
+                    vm_id = $vm.Id.ToString().ToLowerInvariant()
+                    vm_name = [string] $vm.Name
+                    vm_state = $vm.State.ToString()
+                    adapter_name = [string] $adapter.Name
+                    mac_address = [string] $adapter.MacAddress
+                    ip_addresses = $addresses
+                })
+            }
+        }
+        catch { $warnings.Add("VM「$($vm.Name)」のネットワークを取得できません: $($_.Exception.Message)") }
+    }
+
+    $hostAdapters = @()
+    $netAdapters = @()
+    $ipAddresses = @()
+    try { $hostAdapters = @(Get-VMNetworkAdapter -ManagementOS -ErrorAction Stop) }
+    catch { $warnings.Add("ホスト側の仮想NICを取得できません: $($_.Exception.Message)") }
+    try { $netAdapters = @(Get-NetAdapter -IncludeHidden -ErrorAction Stop) }
+    catch { $warnings.Add("ホスト側のNIC情報を取得できません: $($_.Exception.Message)") }
+    try { $ipAddresses = @(Get-NetIPAddress -ErrorAction Stop) }
+    catch { $warnings.Add("ホスト側のIPアドレスを取得できません: $($_.Exception.Message)") }
+
+    foreach ($adapter in $hostAdapters) {
+        $switchId = ([string] $adapter.SwitchId).ToLowerInvariant()
+        if (!$bySwitch.ContainsKey($switchId)) { continue }
+        $matches = @()
+        $deviceId = [guid]::Empty
+        if ([guid]::TryParse([string] $adapter.DeviceId, [ref] $deviceId) -and $deviceId -ne [guid]::Empty) {
+            $matches = @($netAdapters | Where-Object {
+                $interfaceId = [guid]::Empty
+                [guid]::TryParse([string] $_.InterfaceGuid, [ref] $interfaceId) -and $interfaceId -eq $deviceId
+            })
+        }
+        if ($matches.Count -eq 0) {
+            $mac = ([string] $adapter.MacAddress) -replace '[^0-9a-fA-F]', ''
+            if ($mac.Length -eq 12) {
+                $matches = @($netAdapters | Where-Object {
+                    (([string] $_.MacAddress) -replace '[^0-9a-fA-F]', '') -ieq $mac
+                })
+            }
+        }
+        if ($matches.Count -eq 1) {
+            $net = $matches[0]
+            $addresses = @($ipAddresses | Where-Object { $_.InterfaceIndex -eq $net.ifIndex -and $_.IPAddress } | ForEach-Object {
+                '{0}/{1}' -f $_.IPAddress, $_.PrefixLength
+            } | Sort-Object -Unique)
+            $bySwitch[$switchId].host_adapters.Add([pscustomobject]@{
+                name = [string] $net.Name
+                interface_description = [string] $net.InterfaceDescription
+                mac_address = [string] $adapter.MacAddress
+                ip_addresses = $addresses
+                status = [string] $net.Status
+            })
+        }
+        else {
+            $warnings.Add("スイッチ「$($bySwitch[$switchId].name)」のホスト側NICを一意に対応付けられないため、IPを表示できません。")
+            $bySwitch[$switchId].host_adapters.Add([pscustomobject]@{
+                name = [string] $adapter.Name
+                interface_description = ''
+                mac_address = [string] $adapter.MacAddress
+                ip_addresses = @()
+                status = 'Unknown'
+            })
+        }
+    }
+
+    $views = @($switchViews | ForEach-Object {
+        [pscustomobject]@{
+            id = $_.id
+            name = $_.name
+            switch_type = $_.switch_type
+            external_adapter_description = $_.external_adapter_description
+            host_adapters = @($_.host_adapters.ToArray())
+            vm_adapters = @($_.vm_adapters.ToArray() | Sort-Object vm_name, adapter_name)
+        }
+    })
+    [pscustomobject]@{ switches = $views; warnings = @($warnings.ToArray()) }
+}
+
 function Convert-Vm([object] $vm) {
     [pscustomobject][ordered]@{
         id = $vm.Id.ToString()
@@ -1018,6 +1126,10 @@ try {
         'list' {
             $views = @((Get-VM -ErrorAction Stop | ForEach-Object { Convert-Vm $_ }))
             Write-Json $views
+            break
+        }
+        'network_inventory' {
+            Write-Json (Get-NetworkInventory)
             break
         }
         'get' {
