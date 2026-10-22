@@ -249,8 +249,12 @@ function Invoke-CloneVm([object] $request) {
             if (!$request.connect_network) { Disconnect-VMNetworkAdapter -VMNetworkAdapter $adapter -ErrorAction Stop | Out-Null }
             else { Set-NetworkConnection $adapter $sourceSwitches[$key] }
         }
-        foreach ($dvd in @(Get-VMDvdDrive -VM $copy -ErrorAction Stop)) {
-            if ($dvd.Path) { Set-VMDvdDrive -VMDvdDrive $dvd -Path $null -ErrorAction Stop | Out-Null }
+        $copyDvdDrives = @(Get-VMDvdDrive -VM $copy -ErrorAction Stop)
+        # Replace the seed drive's medium directly. Ejecting it first can make
+        # the subsequent Set-VMDvdDrive fail on an imported DVD drive.
+        $guestDvdId = if ($hasGuest -and $copyDvdDrives.Count -gt 0) { [string] $copyDvdDrives[0].Id } else { $null }
+        foreach ($dvd in $copyDvdDrives) {
+            if ($dvd.Path -and [string] $dvd.Id -ne $guestDvdId) { Set-VMDvdDrive -VMDvdDrive $dvd -Path $null -ErrorAction Stop | Out-Null }
         }
         if ([int] $copy.Generation -eq 1) {
             $floppy = Get-VMFloppyDiskDrive -VM $copy -ErrorAction Stop
@@ -272,8 +276,12 @@ function Invoke-CloneVm([object] $request) {
             $vmIdentity = "NT VIRTUAL MACHINE\$($copy.Id)"
             $aclOutput = & $icacls $seedPath '/grant' "$($vmIdentity):(R)" 2>&1
             if ($LASTEXITCODE -ne 0) { throw "OS 設定イメージの読み取り権限を設定できません: $($aclOutput -join ' ')" }
-            $dvd = Get-VMDvdDrive -VM $copy -ErrorAction Stop | Select-Object -First 1
-            if ($dvd) { Set-VMDvdDrive -VMDvdDrive $dvd -Path $seedPath -ErrorAction Stop | Out-Null }
+            $copyDvdDrives = @(Get-VMDvdDrive -VM $copy -ErrorAction Stop)
+            if ($guestDvdId) {
+                $guestDvdDrives = @($copyDvdDrives | Where-Object { [string] $_.Id -eq $guestDvdId })
+                if ($guestDvdDrives.Count -ne 1) { throw 'OS 設定用 DVD ドライブを一意に確認できません。' }
+                Set-VMDvdDrive -VMDvdDrive $guestDvdDrives[0] -Path $seedPath -ErrorAction Stop | Out-Null
+            }
             else { Add-VMDvdDrive -VM $copy -Path $seedPath -ErrorAction Stop | Out-Null }
             if ([int] $copy.Generation -eq 2) { Set-VMFirmware -VM $copy -FirstBootDevice $copyDisks[0] -ErrorAction Stop | Out-Null }
         }
